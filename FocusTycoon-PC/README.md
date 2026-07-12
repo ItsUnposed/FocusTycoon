@@ -5,7 +5,8 @@ AI (Google Gemini) splits it into small steps by how much you want to split it;
 finishing a step earns **gold**. On the **Tycoon** page you spend that same gold to
 grow a world of floating islands.
 
-The app is in **English** with a **language dropdown (English / German)** at the top.
+The app defaults to **German**, with a **language dropdown (Deutsch / English)** at the
+top to switch. The source code itself is always written in English (see `CLAUDE.md`).
 
 ## Start
 
@@ -82,9 +83,13 @@ resources on an **upgrade** — starting or cheering a producer never removes re
 | `util/` | .env reader, Java-compatible hash, fonts |
 | `i18n.py` | English / German text and the tutorial pages |
 
+## Roadmap
+
+Planned work and known rough edges are tracked in [`TODO.md`](TODO.md).
+
 ## Notes
 
 - Tested with **Python 3.14**, which uses `pygame-ce` (same API as `pygame`, but it
   has wheels for new Python versions). The portal needs `cryptography`.
-- The code style follows one rule on request: **no `@` decorators anywhere**, longer
-  and descriptive names, and English comments.
+- The code style rules (English code, no decorators, no `lambda`, descriptive names,
+  generous comments) are written down in [`CLAUDE.md`](CLAUDE.md).
