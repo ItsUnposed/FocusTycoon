@@ -26,11 +26,17 @@ class GameLoop:
         elapsed_per_tick = 1.0 / self._tick_rate_hz
 
         def run():
+            # We track the target time for the next tick (next_time) instead of
+            # just sleeping "period" seconds each loop. This way small delays
+            # from running the tick itself do not add up and slow down the
+            # simulation over time.
             next_time = time.monotonic()
             while not self._stop_event.is_set():
                 try:
                     self._on_tick(elapsed_per_tick)
                 except Exception as error:
+                    # A single failing tick should not crash the whole
+                    # background thread, so we log it and keep going.
                     print(f"Game loop tick failed: {error}")
                 next_time += period
                 sleep_time = next_time - time.monotonic()

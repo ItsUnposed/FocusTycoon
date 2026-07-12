@@ -141,6 +141,9 @@ class PortalSyncService:
         stop_event = threading.Event()
         self._stop_event = stop_event
 
+        # This inner function is the body of the background thread started below.
+        # stop_event.wait(...) both pauses between ticks and lets stop_auto_sync()
+        # end the loop early by setting the event.
         def loop():
             while not stop_event.wait(interval_seconds):
                 if not self._tick_lock.acquire(blocking=False):

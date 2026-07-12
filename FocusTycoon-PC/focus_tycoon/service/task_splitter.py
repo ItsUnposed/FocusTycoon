@@ -13,6 +13,8 @@ from .gemini_service import GeminiService, SPLIT_MEDIUM
 
 class TaskSplitter:
     def __init__(self, gemini=None):
+        # Create the real service by default, but allow a caller (for
+        # example a test) to pass in a fake one instead.
         if gemini is None:
             gemini = GeminiService()
         self.gemini = gemini

@@ -48,18 +48,21 @@ class TextInput:
             elif event.unicode and event.unicode.isprintable():
                 self.text += event.unicode
 
-    def update(self, dt):
+    def update(self, delta_time):
         # The caret blinks once per second.
-        self._caret_timer += dt
+        self._caret_timer += delta_time
         if self._caret_timer >= 0.5:
             self._caret_timer = 0.0
             self._caret_visible = not self._caret_visible
 
     def draw(self, surface):
+        # Highlight the border when the field is focused, so the player can see
+        # where their typing will go.
         border_color = theme.ACCENT if self.focused else theme.STROKE
         theme.rounded_rect(surface, self.rect, theme.CARD, 8, border_color, 1)
 
         font = ui_fonts.base(14)
+        # Leave a small gap between the box edge and the text/caret.
         inner_x = self.rect.x + 14
         inner_y = self.rect.y + 10
 
@@ -80,6 +83,8 @@ class TextInput:
             text = text[1:]
         surface.blit(font.render(text, True, theme.TEXT), (x, y))
         if self.focused and self._caret_visible:
+            # Place the caret right after the visible text, so it looks like
+            # the cursor is at the end of what the player typed.
             caret_x = x + font.size(text)[0] + 1
             pygame.draw.line(surface, theme.TEXT, (caret_x, y + 2),
                              (caret_x, y + font.get_height() - 2), 1)
@@ -87,6 +92,8 @@ class TextInput:
     def _draw_multiline(self, surface, font, x, y):
         lines = self._wrap(font, self.rect.width - 28)
         line_height = font.get_height() + 2
+        # Work out how many lines actually fit in the box, then only keep the
+        # most recent ones - older lines simply scroll out of view above.
         max_lines = max(1, (self.rect.height - 16) // line_height)
         visible_lines = lines[-max_lines:]
         for index, line in enumerate(visible_lines):
@@ -99,17 +106,23 @@ class TextInput:
                              (caret_x, caret_y + font.get_height() - 2), 1)
 
     def _wrap(self, font, max_width):
+        # Split the typed text into lines that are narrow enough to fit inside
+        # the box, breaking on paragraph breaks ("\n") first and then on words.
         result = []
         for paragraph in self.text.split("\n"):
             if not paragraph:
+                # An empty paragraph is a blank line - keep it as one.
                 result.append("")
                 continue
             current = ""
             for word in paragraph.split(" "):
                 candidate = word if not current else current + " " + word
                 if font.size(candidate)[0] <= max_width:
+                    # The word still fits on the current line, keep building it.
                     current = candidate
                 else:
+                    # Adding this word would make the line too wide, so close
+                    # off the current line and start a new one with this word.
                     if current:
                         result.append(current)
                     current = word
@@ -141,6 +154,8 @@ class SegmentedControl:
     def draw(self, surface, x, y, height=40):
         font = ui_fonts.base(14, bold=True)
         padding = 6
+        # Each segment is sized to fit its own label, with some extra room on
+        # each side, so short and long labels both look comfortable.
         segment_widths = [font.size(label)[0] + 40 for label in self.labels]
         total_width = sum(segment_widths) + padding * (len(self.labels) + 1)
         container = pygame.Rect(x, y, total_width, height)
@@ -157,6 +172,7 @@ class SegmentedControl:
             theme.draw_text_centered(surface, label, 14, text_color,
                                      segment_rect.centerx, segment_rect.centery, bold=True)
             self._segment_rects.append(segment_rect)
+            # Move the drawing position past this segment, ready for the next one.
             segment_x += segment_widths[index] + padding
         return container
 
@@ -215,6 +231,7 @@ class Dropdown:
     def handle_event(self, event):
         if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
             return False
+        # Clicking the closed box itself just opens or closes the option list.
         if self.rect.collidepoint(event.pos):
             self.is_open = not self.is_open
             return True
@@ -238,6 +255,8 @@ class Dropdown:
         self._option_rects = []
         if not self.is_open:
             return
+        # Stack the option list directly below the closed box, one row per
+        # option, each row the same height as the box itself.
         for index, option in enumerate(self.options):
             option_rect = pygame.Rect(self.rect.x, self.rect.bottom + 2 + index * self.rect.height,
                                       self.rect.width, self.rect.height)

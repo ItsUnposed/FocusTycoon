@@ -78,10 +78,16 @@ class GameContentRegistry:
 
 # ---------------------------------------------------------------- builders
 
+# Every recipe here turns its inputs into exactly 1 output unit per unit of
+# work, so output_per_unit is always fixed at 1.0.
 def _make_recipe(recipe_id, name, inputs, output):
     return RecipeDefinition(recipe_id, name, inputs, output, 1.0)
 
 
+# Helper so every raw-resource producer (one that turns nothing into a
+# resource, recipe=None) is built the same way, with the burn-time and
+# cheer-cost multipliers applied automatically. 6 is the max upgrade level
+# for these producers.
 def _make_base_producer(generator_id, name, output, per_second, burn, fuel_gold,
                         upgrade_cost, growth):
     return GeneratorDefinition(
@@ -91,6 +97,9 @@ def _make_base_producer(generator_id, name, output, per_second, burn, fuel_gold,
         output.glyph, output.accent)
 
 
+# Same as _make_base_producer, but for refineries: the output resource comes
+# from the recipe instead of being passed in directly, and refineries cap out
+# at a lower max level (5) since they are worth more per level.
 def _make_refinery(generator_id, name, recipe, per_second, burn, fuel_gold,
                    upgrade_cost, growth):
     output = recipe.output
@@ -147,8 +156,8 @@ def register_all(registry):
     brew_herb = _make_recipe("brew_herb", "Brew Herbs", {herbs: 3.0}, elixir_essence)
     grind_rune = _make_recipe("grind_rune", "Grind Runes", {raw_crystal: 3.0}, rune_dust)
     blow_glass = _make_recipe("blow_glass", "Blow Aether", {mist_dew: 3.0}, aether_glass)
-    condense_mana = _make_recipe("cond_mana", "Condense Mana", {crystal_bar: 2.0, rune_dust: 2.0}, mana_stone)
-    distill_star = _make_recipe("dist_star", "Distill Stars", {elixir_essence: 2.0, aether_glass: 2.0}, star_resin)
+    condense_mana = _make_recipe("condense_mana", "Condense Mana", {crystal_bar: 2.0, rune_dust: 2.0}, mana_stone)
+    distill_star = _make_recipe("distill_star", "Distill Stars", {elixir_essence: 2.0, aether_glass: 2.0}, star_resin)
     for recipe in (smelt_ore, brew_herb, grind_rune, blow_glass, condense_mana, distill_star):
         registry.register_recipe(recipe)
 
@@ -169,9 +178,13 @@ def register_all(registry):
                                                {elixir_essence: 18, aether_glass: 18}, 1.9))
 
     # ---- milestones ----
+    # Reached as soon as the player holds any small amount of resources at
+    # all - this is the very first goal a new player should hit.
     def first_output(state):
         return _total_resources(state) >= 15
 
+    # Look through every sector's producers for one that has been upgraded
+    # at least once (level 2 or higher).
     def first_upgrade(state):
         for sector in state.sectors().values():
             for generator in sector.generators():
@@ -182,12 +195,15 @@ def register_all(registry):
     def crystal_unlocked(state):
         return _is_unlocked(state, SECTOR_CRYSTAL)
 
+    # A bigger total-resources goal than first_output, marking real progress.
     def two_hundred_resources(state):
         return _total_resources(state) >= 200
 
     def mist_unlocked(state):
         return _is_unlocked(state, SECTOR_MIST)
 
+    # Reached once the player has collected a handful of tier-2
+    # (master-crafted) resources, regardless of which one.
     def first_masterwork(state):
         return state.inventory().amount_of(mana_stone) + state.inventory().amount_of(star_resin) >= 5
 

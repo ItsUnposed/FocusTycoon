@@ -20,15 +20,22 @@ from .portal_client import PortalClient
 from .portal_exception import PortalAuthException, PortalScrapeException
 from .util import date_utils, subject_mapper, text_utils
 
+# Moodle embeds the "sesskey" token (needed to call the AJAX API) either as JSON
+# on the page, or as a plain query parameter in a link - _extract_session_key()
+# below tries both.
 _SESSION_KEY_JSON = re.compile(r'"sesskey":"([^"]+)"')
 _SESSION_KEY_FORM = re.compile(r"sesskey=([A-Za-z0-9]+)")
 
 
 def _as_string(value):
+    # The Moodle JSON response is not fully trusted, so only accept an actual string.
     return value if isinstance(value, str) else None
 
 
 def _as_long(value):
+    # The Moodle JSON response can encode a number as an int, a float, or even a
+    # numeric string, so normalize all of those to a plain int (and reject
+    # True/False, which Python also treats as a number).
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
@@ -86,7 +93,9 @@ class LogineoClient(PortalClient):
         time_sort_from = start_of_today - past_days * 86400
         time_sort_to = int(time.time()) + 365 * 86400
 
-        # 7. Call the Moodle AJAX endpoint.
+        # 7. Call the Moodle AJAX endpoint. The request body has a fixed, known
+        # shape, so it is written out directly instead of building it with a
+        # dictionary + json.dumps.
         ajax_url = (base + "/lib/ajax/service.php?sesskey=" + portal_http.url_encode(session_key)
                     + "&info=core_calendar_get_action_events_by_timesort")
         body = ('[{"index":0,"methodname":"core_calendar_get_action_events_by_timesort",'
@@ -131,8 +140,12 @@ class LogineoClient(PortalClient):
             activity_name = _as_string(item.get("activityname"))
             name = _as_string(item.get("name"))
             event_id = _as_long(item.get("id"))
-            title_missing = ((activity_name is None or not activity_name.strip())
-                             and (name is None or not name.strip()))
+
+            # The event needs a title from at least one of the two possible fields.
+            has_activity_name = activity_name is not None and activity_name.strip()
+            has_name = name is not None and name.strip()
+            title_missing = not has_activity_name and not has_name
+
             if time_sort is None or event_id is None or title_missing:
                 continue  # required fields are missing
 

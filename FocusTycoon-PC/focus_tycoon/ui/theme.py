@@ -37,31 +37,39 @@ def clamp_channel(value):
 
 def mix(color_a, color_b, ratio):
     """Blend two colours. ratio 0 = color_a, ratio 1 = color_b."""
+    # Keep the ratio inside 0-1 so the blend never overshoots either colour.
     if ratio < 0.0:
         ratio = 0.0
     if ratio > 1.0:
         ratio = 1.0
+    # For each colour channel, move "ratio" of the way from color_a to color_b.
     return (clamp_channel(color_a[0] + (color_b[0] - color_a[0]) * ratio),
             clamp_channel(color_a[1] + (color_b[1] - color_a[1]) * ratio),
             clamp_channel(color_a[2] + (color_b[2] - color_a[2]) * ratio))
 
 
 def brighter(color, amount):
+    """Make a colour lighter by blending it with white."""
     return mix(color, (255, 255, 255), amount)
 
 
 def darker(color, amount=0.2):
+    """Make a colour darker by blending it with black."""
     return mix(color, (0, 0, 0), amount)
 
 
 def rounded_rect(surface, rect, color, radius, border_color=None, border_width=0):
+    """Draw a filled rectangle with rounded corners, and an optional border on top."""
     pygame.draw.rect(surface, color, rect, border_radius=radius)
+    # Only draw the border if the caller actually asked for one.
     if border_color is not None and border_width > 0:
         pygame.draw.rect(surface, border_color, rect, width=border_width, border_radius=radius)
 
 
 def draw_text(surface, text, size, color, x, y, bold=False, italic=False, symbol=True):
     """Draw text at the top-left corner and return the rectangle it filled."""
+    # "symbol" text may contain glyphs (like stars) that the normal font cannot show,
+    # so it needs a font that supports them. Plain text can use the normal font.
     if symbol:
         font = ui_fonts.for_text(text, size, bold, italic)
     else:
@@ -73,6 +81,7 @@ def draw_text(surface, text, size, color, x, y, bold=False, italic=False, symbol
 
 def draw_text_centered(surface, text, size, color, center_x, center_y,
                        bold=False, italic=False, symbol=True):
+    """Draw text centered on the given point and return the rectangle it filled."""
     if symbol:
         font = ui_fonts.for_text(text, size, bold, italic)
     else:
@@ -84,4 +93,5 @@ def draw_text_centered(surface, text, size, color, center_x, center_y,
 
 
 def text_width(text, size, bold=False):
+    """Return how wide this text would be in pixels, without drawing it."""
     return ui_fonts.for_text(text, size, bold).size(text)[0]

@@ -27,12 +27,14 @@ class HudPanel:
         self.state = state
         self._status = "Cheer a producer to get started."
         self._status_lock = threading.Lock()
+        # Listen for game events so the status line can react to them (see on_juice_event below).
         bus.subscribe(self.on_juice_event)
 
     def stop(self):
-        pass
+        pass  # the HUD has no timer or thread of its own to stop
 
     def on_juice_event(self, event):
+        # Turn certain game events into a short status message shown at the bottom of the panel.
         message = None
         if isinstance(event, MilestoneReached):
             message = "★ Milestone: " + event.milestone.description
@@ -48,7 +50,8 @@ class HudPanel:
         panel = surface.subsurface(rect)
         width, height = rect.width, rect.height
 
-        # Background gradient.
+        # Background gradient: blend from one dark color at the top to another at the bottom,
+        # one pixel row at a time, so the panel does not look flat.
         for y in range(height):
             ratio = y / max(1, height)
             color = (int(20 + (14 - 20) * ratio), int(22 + (15 - 22) * ratio), int(38 + (26 - 38) * ratio))
@@ -64,6 +67,7 @@ class HudPanel:
         panel.blit(star, (coin_x + 6, coin_y + 4))
 
         gold_amount = max(0, round(self.state.gold().balance()))
+        # Python's ',' thousands separator is swapped for '.' to match the German number style used in-game.
         gold_text = ui_fonts.base(24, bold=True).render(f"{gold_amount:,}".replace(",", "."), True, GOLD)
         panel.blit(gold_text, (coin_x + 36, coin_y - 2))
         panel.blit(ui_fonts.base(11).render("GOLD", True, MUTED), (coin_x + 36, coin_y + 24))
@@ -73,11 +77,13 @@ class HudPanel:
         chip_y = 16
         max_x = width - 40
         for resource, amount in self.state.inventory().snapshot().items():
+            # Skip resources the player barely has; a chip showing "0" is not useful.
             if amount < 0.5:
                 continue
             text = f"{resource.glyph} {math.floor(amount)}"
             font = ui_fonts.for_text(text, 13)
             chip_width = font.size(text)[0] + 20
+            # Stop adding chips once we would run out of horizontal space in the panel.
             if chip_x + chip_width > max_x:
                 break
             accent = resource.accent

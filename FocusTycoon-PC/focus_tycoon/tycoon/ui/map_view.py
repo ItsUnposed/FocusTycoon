@@ -40,6 +40,7 @@ GOLD = (245, 205, 96)
 
 
 def clamp_channel(value):
+    # Keep a single red/green/blue value inside the valid 0-255 range.
     if value < 0:
         return 0
     if value > 255:
@@ -48,6 +49,8 @@ def clamp_channel(value):
 
 
 def mix(color_a, color_b, ratio):
+    # Blend two RGB colors together. ratio 0.0 gives color_a, ratio 1.0 gives color_b,
+    # and anything in between gives a smooth step from one to the other.
     if ratio < 0.0:
         ratio = 0.0
     if ratio > 1.0:
@@ -58,6 +61,7 @@ def mix(color_a, color_b, ratio):
 
 
 def brighter(color, amount):
+    # Move a color partway toward white, which reads as "lighter" or "glowing".
     return mix(color, (255, 255, 255), amount)
 
 
@@ -91,6 +95,8 @@ class MapView:
         self.screen_shaker = screen_shaker
         bus.subscribe(self.on_juice_event)
 
+        # convert() matches the surface's pixel format to the display, which makes
+        # pygame's blit (copy) operations noticeably faster later on.
         self.surface = pygame.Surface((MAP_WIDTH, MAP_HEIGHT)).convert()
         self.clock = 0.0
         self._floats = []
@@ -98,26 +104,30 @@ class MapView:
         self._pulse_clock = {}  # generator_id -> clock time of the last pop
         self._pulse_lock = threading.Lock()
 
-        # A stable star field.
-        rng = random.Random(20260708)
+        # A stable star field: seeded with a fixed number so the stars land in the same
+        # spots every time the game runs, instead of jumping around on each restart.
+        random_generator = random.Random(20260708)
         self._stars = []
         for _ in range(190):
-            self._stars.append((rng.randint(0, MAP_WIDTH - 1), rng.randint(0, MAP_HEIGHT - 1),
-                                0.2 + rng.random() * 0.8))
+            self._stars.append((random_generator.randint(0, MAP_WIDTH - 1), random_generator.randint(0, MAP_HEIGHT - 1),
+                                0.2 + random_generator.random() * 0.8))
 
     # ---------- lifecycle ----------
 
     def stop(self):
         pass  # no own timer needed (the app drives update / render)
 
-    def update(self, dt):
-        self.clock += dt
-        self.particle_layer.update(dt)
+    def update(self, dt_seconds):
+        self.clock += dt_seconds
+        self.particle_layer.update(dt_seconds)
         with self._floats_lock:
             for float_text in self._floats:
-                float_text.age += dt
-                float_text.y += float_text.vy * dt
-                float_text.vy += 26 * dt
+                float_text.age += dt_seconds
+                # Move the floating text upward, then let a small constant "gravity"
+                # slow that upward motion so it arcs and settles like a real popup.
+                float_text.y += float_text.vy * dt_seconds
+                float_text.vy += 26 * dt_seconds
+            # Drop any floating text whose lifetime has run out.
             self._floats = [f for f in self._floats if f.age < f.life]
 
     # ---------- juice -> popups ----------
@@ -128,6 +138,8 @@ class MapView:
             self._add_float(px, py - DISC_RADIUS - 18, "Cheered!", GOLD, 15)
             self._set_pulse(event.generator_id)
         elif isinstance(event, ResourceProduced):
+            # Cap how many floating texts can be on screen at once, so a burst of
+            # production events cannot flood the map with overlapping popups.
             with self._floats_lock:
                 too_many = len(self._floats) > 60
             if too_many or event.amount < 1:
@@ -137,6 +149,8 @@ class MapView:
             self._add_float(px, py - DISC_RADIUS - 6,
                             f"+{round(event.amount)} {resource.glyph}", brighter(resource.accent, 0.35), 13)
         elif isinstance(event, RecipeCompleted):
+            # Cap how many floating texts can be on screen at once, so a burst of
+            # production events cannot flood the map with overlapping popups.
             with self._floats_lock:
                 too_many = len(self._floats) > 60
             if too_many:
@@ -165,8 +179,12 @@ class MapView:
             self._pulse_clock[generator_id] = self.clock
 
     def _pixel_of(self, position):
+        # No grid position means the event is not tied to one spot on the map,
+        # so just center it on the map.
         if position is None:
             return MAP_WIDTH / 2.0, MAP_HEIGHT / 2.0
+        # Convert a grid cell to the pixel position of its center, then lift it up a
+        # little (DISC_Y_LIFT) so it lines up with where the producer disc is drawn.
         return (position.grid_x * TILE_SIZE + TILE_SIZE / 2.0,
                 position.grid_y * TILE_SIZE + TILE_SIZE / 2.0 - DISC_Y_LIFT)
 
@@ -189,6 +207,7 @@ class MapView:
     # ---------- input ----------
 
     def is_over_interactive(self, px, py):
+        """Whether the point (px, py) is over something clickable, used to swap the cursor."""
         for sector in self.state.sectors().values():
             if not sector.is_unlocked():
                 if self._island_rect(sector.definition).collidepoint(px, py):
@@ -202,6 +221,7 @@ class MapView:
         return False
 
     def handle_click(self, px, py):
+        """Work out what was clicked at (px, py) and trigger the matching action."""
         for sector in self.state.sectors().values():
             if not sector.is_unlocked():
                 continue
@@ -248,11 +268,16 @@ class MapView:
         return surface
 
     def _paint_sky(self, surface):
+        # Fill the background with a top-to-bottom gradient, one row at a time.
         for y in range(MAP_HEIGHT):
             ratio = y / MAP_HEIGHT
             surface.fill(mix(SKY_TOP, SKY_BOTTOM, ratio), (0, y, MAP_WIDTH, 1))
+        # twinkle drifts smoothly between 0 and 1 over time, so the whole star field
+        # pulses gently instead of staying static.
         twinkle = 0.5 + 0.5 * math.sin(self.clock * 1.5)
         for index, (star_x, star_y, magnitude) in enumerate(self._stars):
+            # Spread stars across 5 groups (index % 5) so they do not all twinkle in
+            # perfect unison, which would look mechanical instead of natural.
             brightness = magnitude * (0.6 + 0.4 * ((index % 5) / 4.0) * twinkle)
             alpha = round(min(1.0, brightness) * 200)
             size = 2 if magnitude > 0.75 else 1
@@ -264,6 +289,7 @@ class MapView:
         with self._floats_lock:
             floats = list(self._floats)
         for float_text in floats:
+            # As the text gets older it fades out, reaching full transparency at its life limit.
             fade = max(0.0, min(1.0, 1 - float_text.age / float_text.life))
             alpha = round(fade * 255)
             if alpha <= 0:
@@ -349,6 +375,9 @@ class MapView:
         fuel = generator.fuel_fraction()
         level = generator.level()
         pop = self._pop_factor(generator.instance_id)
+        # The disc grows a little with each level, but the growth is capped so it
+        # never gets huge. On top of that, "pop" briefly makes it swell right after
+        # a cheer or upgrade, then shrink back to normal size.
         core_radius = DISC_RADIUS + min(level - 1, 5)
         disc_radius = round(core_radius * (1 + 0.22 * pop))
 
@@ -411,11 +440,14 @@ class MapView:
         self._paint_upgrade_button(surface, generator)
 
     def _paint_gear_teeth(self, surface, center_x, center_y, disc_radius, level, accent, fueled):
+        # Higher-level producers get more gear teeth, so leveling up is visible at a glance.
         teeth = 8 + (level - 1) * 2
+        # Only spin the gear while the producer is actually fueled (working).
         spin = self.clock * 0.6 if fueled else 0
         tooth_color = mix(accent, (18, 20, 28), 0.35)
         inner_radius = disc_radius - 1
         outer_radius = disc_radius + 4
+        # Draw one short line per tooth, evenly spaced around the circle.
         for i in range(teeth):
             angle = spin + i * (2 * math.pi / teeth)
             x0 = center_x + int(math.cos(angle) * inner_radius)
@@ -428,6 +460,7 @@ class MapView:
         workers = min(level, 6)
         if workers <= 0:
             return
+        # Workers orbit faster while the producer is fueled (busy working) and slower otherwise.
         spin = self.clock * 1.4 if fueled else self.clock * 0.2
         orbit = disc_radius - 9
         dot_color = brighter(accent, 0.55)
@@ -470,6 +503,8 @@ class MapView:
         return (not generator.can_upgrade()) and generator.fuel_fraction() >= 0.95
 
     def _pop_factor(self, instance_id):
+        """How strong the "pop" animation should be right now, from 1.0 (just triggered)
+        down to 0.0 (animation finished or never triggered)."""
         with self._pulse_lock:
             start_time = self._pulse_clock.get(instance_id)
         if start_time is None:
@@ -490,6 +525,9 @@ class MapView:
         surface.blit(rendered, rendered.get_rect(midbottom=(int(center_x), int(baseline_y + size * 0.28))))
 
     def _circle_outline(self, surface, rgba, center_x, center_y, radius, width):
+        # A translucent color needs to be drawn onto its own transparent surface first
+        # and then blended in, because pygame.draw.circle cannot blend partial
+        # transparency directly onto a surface that has none of its own.
         if len(rgba) == 4 and rgba[3] < 255:
             temp = pygame.Surface((radius * 2 + width * 2, radius * 2 + width * 2), pygame.SRCALPHA)
             center = temp.get_rect().center
@@ -507,6 +545,8 @@ class MapView:
         if radius <= 0:
             return
         temp = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+        # pygame has no built-in radial gradient, so fake one by drawing solid circles
+        # from the outer edge inward, each one slightly smaller and closer to inner_color.
         steps = max(1, radius)
         for i in range(steps, 0, -1):
             ratio = 1 - i / steps

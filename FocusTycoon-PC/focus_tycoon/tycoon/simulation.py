@@ -99,6 +99,7 @@ class FuelingService:
         return True
 
     def unlock_sector(self, state, sector, bus: JuiceEventBus):
+        """Unlock a sector: spend gold once, then it stays unlocked forever."""
         if sector.is_unlocked():
             return True
         if not state.gold().try_spend(sector.definition.unlock_cost):

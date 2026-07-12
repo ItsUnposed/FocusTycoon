@@ -10,6 +10,8 @@ import threading
 
 from .task import Task
 
+# Every quest gets a unique id. A lock keeps this safe if two threads create
+# quests at the same time.
 _id_lock = threading.Lock()
 _id_counter = itertools.count(1)
 
@@ -62,16 +64,21 @@ class Quest:
     def move_stage_up(self, task_id: int) -> bool:
         index = self._index_of(task_id)
         if index > 0:
-            self._stages[index], self._stages[index - 1] = \
-                self._stages[index - 1], self._stages[index]
+            # Swap this stage with the one directly above it, using a
+            # temporary variable so neither value is lost during the swap.
+            stage_to_move = self._stages[index]
+            self._stages[index] = self._stages[index - 1]
+            self._stages[index - 1] = stage_to_move
             return True
         return False
 
     def move_stage_down(self, task_id: int) -> bool:
         index = self._index_of(task_id)
         if 0 <= index < len(self._stages) - 1:
-            self._stages[index], self._stages[index + 1] = \
-                self._stages[index + 1], self._stages[index]
+            # Swap this stage with the one directly below it.
+            stage_to_move = self._stages[index]
+            self._stages[index] = self._stages[index + 1]
+            self._stages[index + 1] = stage_to_move
             return True
         return False
 

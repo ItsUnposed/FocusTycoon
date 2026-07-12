@@ -20,21 +20,42 @@ from .portal_client import PortalClient
 from .portal_exception import PortalAuthException
 from .util import date_utils, subject_mapper, text_utils
 
+# These regexes power the three scraping strategies in _parse_exercises() below.
+# They are plain string matching against the raw HTML - there is no proper HTML
+# parser here, so each one only has to be "good enough" for the IServ page layout.
+
+# Matches the contents of a <tbody>...</tbody> block (used to find the last table).
 _TABLE_BODY = re.compile(r"<tbody[^>]*>(.*?)</tbody>", re.IGNORECASE | re.DOTALL)
+# Matches the contents of one <tr>...</tr> table row.
 _TABLE_ROW = re.compile(r"<tr[^>]*>(.*?)</tr>", re.IGNORECASE | re.DOTALL)
+# Matches a link to a single exercise inside a table row, capturing the exercise
+# id from the URL and the link text as the title.
 _EXERCISE_ANCHOR = re.compile(
     r'<a[^>]*href="[^"]*/iserv/exercise/(?:show/)?(\d+)[^"]*"[^>]*>(.*?)</a>',
     re.IGNORECASE | re.DOTALL)
+# Same idea as _EXERCISE_ANCHOR, but searches the whole page (not just inside a
+# table row) - used by the fallback "links" strategy.
 _EXERCISE_LINK_GLOBAL = re.compile(
     r'href="/iserv/exercise/show/(\d+)"[^>]*>([^<]+)', re.IGNORECASE | re.DOTALL)
+# Matches a data-id or data-exercise-id HTML attribute, another way IServ marks
+# up the exercise id when there is no plain link.
 _DATA_ID = re.compile(r'data-(?:exercise-)?id="(\d+)"', re.IGNORECASE)
+# Matches a JSON array embedded directly in a <script> tag (the third, last-resort
+# strategy, for pages that render exercises via JavaScript instead of HTML).
 _INLINE_JSON = re.compile(
     r"(?:window\.exerciseData|exercises)\s*[:=]\s*(\[\{.*?\}\])", re.IGNORECASE | re.DOTALL)
+# Matches a plain "YYYY-MM-DD" date string.
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# How many characters of surrounding text to look at (before and after a link) when
+# guessing the due date / subject for the "links" strategy, which has no table
+# structure to rely on.
 _CONTEXT_RADIUS = 600
 
 
 def _id_string(value):
+    # The embedded JSON can encode an exercise id as a number or as a string,
+    # so normalize both to a plain string (and reject anything else, including
+    # True/False, which Python also treats as a number).
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
@@ -44,9 +65,12 @@ def _id_string(value):
     return None
 
 
-def _first_string(obj, *keys):
+def _first_string(data, *keys):
+    # The embedded JSON is not guaranteed to use the same field name for the same
+    # thing, so try each candidate key in order and use the first one that has a
+    # real (non-empty) string value.
     for key in keys:
-        value = obj.get(key)
+        value = data.get(key)
         if isinstance(value, str) and value.strip():
             return value
     return None
@@ -99,6 +123,9 @@ class IServClient(PortalClient):
     def _parse_exercises(self, html):
         if "table-empty" in html:
             return []  # a valid empty state - no current exercises
+        # Try each strategy in order and use the first one that actually finds
+        # something. IServ pages differ enough between school setups that no
+        # single strategy always works.
         strategy1 = self._strategy_table_rows(html)
         if strategy1:
             return strategy1
@@ -113,6 +140,7 @@ class IServClient(PortalClient):
         if table_body is None:
             return []
         result = []
+        # Tracks external ids already added, so the same exercise is not listed twice.
         seen = set()
         for row_match in _TABLE_ROW.finditer(table_body):
             row = row_match.group(1)

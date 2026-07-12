@@ -119,6 +119,9 @@ class Inventory:
             for resource, amount in per_unit.items():
                 if amount <= 0:
                     continue
+                # The scarcest required resource is what limits how many units
+                # we can make, so we keep shrinking max_units to the smallest
+                # available-amount / required-amount ratio seen so far.
                 max_units = min(max_units, self._stacks.get(resource, 0.0) / amount)
             return max(0.0, max_units)
 
@@ -268,6 +271,9 @@ class GeneratorInstance:
 
     def current_output_per_second(self):
         with self._lock:
+            # Full efficiency while the tank still has fuel; otherwise fall
+            # back to the small passive trickle so the producer never fully
+            # stops.
             if self._fuel > 1e-6:
                 efficiency = 1.0
             else:
@@ -282,6 +288,8 @@ class GeneratorInstance:
         with self._lock:
             if self._fuel <= 0:
                 return
+            # Fuel drains at a constant rate, so a full tank (1.0) reaches
+            # empty (0.0) after exactly fuel_burn_seconds of real time.
             self._fuel = max(0.0, self._fuel - elapsed_seconds / self.definition.fuel_burn_seconds)
 
     def can_upgrade(self):
@@ -292,6 +300,9 @@ class GeneratorInstance:
         with self._lock:
             if self._level >= self.definition.max_level:
                 return {}
+            # Each level makes the next upgrade cost more: the base cost is
+            # multiplied by the growth factor raised to the number of levels
+            # already gained, so the cost curve grows exponentially.
             factor = self.definition.upgrade_cost_growth ** (self._level - 1)
             cost = {}
             for resource, amount in self.definition.base_upgrade_cost.items():
@@ -305,10 +316,14 @@ class GeneratorInstance:
 
     def restore_level(self, saved_level):
         with self._lock:
+            # Clamp to a valid range in case the save file is old and its
+            # level no longer fits within the current max_level.
             self._level = max(1, min(self.definition.max_level, saved_level))
 
     def restore_fuel(self, saved_fuel_fraction):
         with self._lock:
+            # Clamp to a valid range in case the saved value is corrupted or
+            # out of date.
             self._fuel = max(0.0, min(1.0, saved_fuel_fraction))
 
     def add_unpulsed_output(self, amount):
@@ -317,6 +332,8 @@ class GeneratorInstance:
 
     def drain_pulse_if_ready(self, threshold):
         with self._lock:
+            # Only report output once it has piled up past the threshold, so
+            # the juice bus does not fire an event on every single tick.
             if self._unpulsed_output >= threshold:
                 total = self._unpulsed_output
                 self._unpulsed_output = 0.0

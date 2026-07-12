@@ -75,6 +75,9 @@ class JuiceEventBus:
             self._listeners.append(listener)
 
     def publish(self, event):
+        # Copy the listener list while holding the lock, then call the
+        # listeners after releasing it. This way a slow listener cannot
+        # block other threads from subscribing while events are being sent.
         with self._lock:
             listeners = list(self._listeners)
         for listener in listeners:

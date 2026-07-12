@@ -89,7 +89,10 @@ class GeminiService:
         if text is None or text.strip() == "":
             return False
         lower_text = text.lower().strip()
+        # A clock time like "15:00" strongly suggests a fixed appointment.
         has_time = _TIME_PATTERN.match(text) is not None
+        # Also check for German and English words that usually mean a fixed
+        # appointment, since portal texts can be in either language.
         keywords = ("uhr", "termin", "meeting", "arzt", "verabredung", "geburtstag",
                     "appointment", "o'clock")
         has_keyword = False
@@ -107,11 +110,16 @@ class GeminiService:
 
         Raises an error if the API is not configured or not reachable.
         """
+        # If the caller did not say whether this is a fixed appointment,
+        # guess it from the text itself.
         if treat_as_single is None:
             treat_as_single = self.looks_like_a_fixed_appointment(raw_task_input)
 
         # "Do not split" or a detected fixed appointment: keep it as one task.
         if split_level == SPLIT_NONE or treat_as_single:
+            # Fall back to a default duration if none was estimated, and
+            # always use a medium reward since there are no steps to base a
+            # reward level on.
             minutes = estimated_total_minutes if estimated_total_minutes > 0 else 30
             reward_level = SPLIT_MEDIUM
             return [Task(raw_task_input, reward_level, minutes)]
@@ -172,8 +180,16 @@ class GeminiService:
 
     def _build_breakdown_prompt(self, raw_task_input, description, split_level,
                                 estimated_total_minutes):
+        """Build the full text prompt we send to the Gemini API.
+
+        This is plain text instructions for the AI, built up piece by piece:
+        how much to split the task, the task itself, any extra context /
+        time estimate the user gave, and the exact JSON format we expect back.
+        """
         level_instruction = self._level_instruction(split_level)
 
+        # Only mention the extra description if the user actually gave one,
+        # so the prompt does not confuse the AI with an empty context section.
         context_block = ""
         if description is not None and description.strip():
             context_block = (
@@ -181,6 +197,7 @@ class GeminiService:
                 "concrete and correct, but do not invent things that are not there):\n"
                 f'"{description.strip()}"\n')
 
+        # Same idea: only add the time estimate section if the user gave one.
         estimate_block = ""
         if estimated_total_minutes > 0:
             estimate_block = (
@@ -209,6 +226,7 @@ class GeminiService:
             '[{"title": "Short heading", "detail": "What to do here.", "estimated_minutes": 5}]\n')
 
     def _level_instruction(self, split_level):
+        """Return the paragraph of prompt text describing the chosen split level."""
         if split_level == SPLIT_FINE:
             return (
                 "SPLIT LEVEL: FINE (split as much as possible).\n"
@@ -230,6 +248,7 @@ class GeminiService:
             '"estimated_minutes" is between 10 and 15.')
 
     def _build_estimate_prompt(self, raw_task_input, description):
+        """Build the prompt used by estimate_minutes to ask for a total duration."""
         context_block = ""
         if description is not None and description.strip():
             context_block = f'\nExtra context: "{description.strip()}"\n'
@@ -255,6 +274,13 @@ class GeminiService:
     # ---------- parsing the answer ----------
 
     def _extract_answer_text(self, response_body):
+        """Dig the AI's actual text answer out of Gemini's response envelope.
+
+        Gemini wraps its answer in a nested structure that looks like:
+        {"candidates": [{"content": {"parts": [{"text": "..."}]}}]}
+        We only ever ask for one answer, so we always read the first
+        candidate and its first part.
+        """
         root = json.loads(response_body)
         candidates = root["candidates"]
         content = candidates[0]["content"]
@@ -262,11 +288,14 @@ class GeminiService:
         return parts[0]["text"]
 
     def _parse_steps(self, answer_text, split_level):
+        # The prompt asks for a JSON array of step objects; answer_text
+        # should already be exactly that.
         array = json.loads(answer_text.strip())
         # Fine mode may return many steps; medium/coarse only a few.
         reward_level = split_level if split_level in (SPLIT_FINE, SPLIT_MEDIUM, SPLIT_COARSE) else SPLIT_MEDIUM
         steps = []
         for item in array:
+            # Fall back to safe defaults in case the AI ever leaves a field out.
             title = self._shorten_title(str(item.get("title", "Step")))
             detail = str(item.get("detail", "")) if item.get("detail") is not None else ""
             minutes = self._read_int(item, 5, "estimated_minutes", "estimatedMinutes", "minutes")
@@ -285,6 +314,8 @@ class GeminiService:
         return self._read_int(obj, 30, "estimated_minutes", "estimatedMinutes", "minutes")
 
     def _read_int(self, obj, fallback, *keys):
+        # The AI might name the field differently between calls (snake_case
+        # or camelCase), so try every known spelling before giving up.
         for key in keys:
             value = obj.get(key)
             if isinstance(value, (int, float)) and not isinstance(value, bool):

@@ -26,6 +26,7 @@ def build_ai_context(event):
     """Turn an event into a description the AI can split into steps."""
     parts = [f'Calendar event: "{event.summary.strip()}".']
     if event.start is not None:
+        # All-day events have no meaningful clock time, so only show the date.
         if event.all_day:
             when = event.start.strftime(_DATE_FORMAT)
         else:
@@ -36,6 +37,7 @@ def build_ai_context(event):
     if event.description and event.description.strip():
         details = event.description.strip()
         parts.append(f" Details: {details}")
+        # Make sure the sentence ends properly before we append more text.
         if not details.endswith("."):
             parts.append(".")
     parts.append(" Create concrete preparation steps so it is finished in time.")
@@ -49,6 +51,8 @@ class CalendarImportService:
 
     def load_from_url(self, url):
         normalized = url.strip()
+        # "webcal://" is just a hint for calendar apps to subscribe to the
+        # feed; the actual file is served the same way as over https.
         if normalized[:9].lower() == "webcal://":
             normalized = "https://" + normalized[9:]
         request = urllib.request.Request(normalized, headers={"Accept": "text/calendar"})
@@ -62,8 +66,10 @@ class CalendarImportService:
         horizon = now + timedelta(days=window_days)
         upcoming = []
         for event in events:
+            # Events without a start date cannot be sorted or shown, so skip them.
             if event.start is None:
                 continue
+            # Only keep events that are still ahead of us and inside the window.
             if event.start < now or event.start > horizon:
                 continue
             upcoming.append(event)
@@ -71,5 +77,6 @@ class CalendarImportService:
         def start_time(event):
             return event.start
 
+        # Earliest events first, and cap the list so the AI never sees too many at once.
         upcoming.sort(key=start_time)
         return upcoming[:MAX_EVENTS]

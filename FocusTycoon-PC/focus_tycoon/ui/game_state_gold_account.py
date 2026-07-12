@@ -22,7 +22,10 @@ class GameStateGoldAccount(GoldAccount):
         return self._game.get_gold()
 
     def credit(self, amount):
+        # Round to the nearest whole coin when adding gold earned in the Tycoon.
         self._game.add_gold(round(amount))
 
     def try_spend(self, amount):
+        # Round the cost up, so the player never gets to spend a fraction of a
+        # coin they do not actually have.
         return self._game.spend_gold(math.ceil(amount))

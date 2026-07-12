@@ -57,9 +57,13 @@ class SaveGame:
             for task_data in quest_data.stages:
                 task = Task(task_data.title, task_data.energy_level,
                             task_data.minutes, task_data.detail)
+                # Set the flag directly instead of calling complete_task(),
+                # so the gold reward is not paid out a second time for a
+                # step that was already finished before saving.
                 if task_data.completed:
                     task.completed = True
                 stages.append(task)
+            # Only keep quests that still have at least one stage.
             if stages:
                 game.add_quest(Quest(quest_data.title, quest_data.energy_level, stages))
 

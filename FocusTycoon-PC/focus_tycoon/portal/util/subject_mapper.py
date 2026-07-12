@@ -6,10 +6,14 @@ import re
 
 _FALLBACK = "Other"
 
+# Matches Moodle-style course shortnames like "10a-MA-3": the part between the
+# dashes (here "MA") is the subject code we want to capture.
 _COURSE_CODE = re.compile(r"^[A-Za-z0-9]+-([A-Za-z]{1,4})-")
 
 
 def _fill(mapping, value, *keys):
+    # Small helper so each subject can be added under several spellings /
+    # course codes in one call, instead of repeating "mapping[key] = value".
     for key in keys:
         mapping[key] = value
 
@@ -60,17 +64,22 @@ def normalize_subject(raw):
     lower = raw.lower().strip()
     if not lower:
         return _FALLBACK
+    # Insertion order matters here: we return the value for the first key in
+    # _SUBJECT_MAP that the text starts with.
     for key, value in _SUBJECT_MAP.items():
         if lower.startswith(key):
             return value
     trimmed = raw.strip()
     if not trimmed:
         return _FALLBACK
+    # No known subject matched, so fall back to a shortened version of the raw
+    # text (Python slicing is safe even if trimmed is shorter than 20 characters).
     return trimmed[:min(20, len(trimmed))]
 
 
 def subject_from_course(shortname, fullname):
     """Moodle course -> subject: first the code in the shortname, else normalize_subject."""
+    # First try the reliable path: a known course code inside the shortname.
     if shortname is not None:
         match = _COURSE_CODE.search(shortname)
         if match:
@@ -78,6 +87,8 @@ def subject_from_course(shortname, fullname):
             mapped = _CODE_MAP.get(code)
             if mapped is not None:
                 return mapped
+    # No usable code found, so fall back to guessing from whichever course
+    # name we have (prefer the full name, since it is more descriptive).
     if fullname is not None and fullname.strip():
         base = fullname
     elif shortname is not None and shortname.strip():

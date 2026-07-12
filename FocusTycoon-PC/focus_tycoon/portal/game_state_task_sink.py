@@ -19,6 +19,8 @@ class GameStateTaskSink(TaskSink):
         imported = 0
         skipped = 0
         for task in tasks:
+            # upsert_imported_homework() de-duplicates by external id: it returns
+            # True only if this task was not already in the game state.
             is_new = self._game.upsert_imported_homework(ImportedHomework(
                 task.subject, task.title, task.due_date, task.external_portal_id, False))
             if is_new:

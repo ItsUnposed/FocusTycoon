@@ -28,9 +28,13 @@ class CredentialCipher:
 
     def encrypt(self, plaintext):
         try:
-            iv = os.urandom(_IV_LENGTH)
-            ciphertext = AESGCM(self._key).encrypt(iv, plaintext.encode("utf-8"), None)
-            return (base64.b64encode(iv).decode("ascii") + ":"
+            # A fresh random initialization vector every time: reusing one with the
+            # same key would make AES-GCM unsafe.
+            initialization_vector = os.urandom(_IV_LENGTH)
+            ciphertext = AESGCM(self._key).encrypt(
+                initialization_vector, plaintext.encode("utf-8"), None)
+            # Wire format from the module docstring: base64(iv) + ":" + base64(ciphertext+tag).
+            return (base64.b64encode(initialization_vector).decode("ascii") + ":"
                     + base64.b64encode(ciphertext).decode("ascii"))
         except Exception:
             # Do not put the password or any detail into the message.
@@ -38,10 +42,12 @@ class CredentialCipher:
 
     def decrypt(self, encoded):
         try:
+            # Split "base64(iv):base64(ciphertext+tag)" at the separator.
             separator = encoded.index(":")
-            iv = base64.b64decode(encoded[:separator])
+            initialization_vector = base64.b64decode(encoded[:separator])
             ciphertext = base64.b64decode(encoded[separator + 1:])
-            return AESGCM(self._key).decrypt(iv, ciphertext, None).decode("utf-8")
+            return AESGCM(self._key).decrypt(
+                initialization_vector, ciphertext, None).decode("utf-8")
         except Exception:
             raise DecryptException()
 

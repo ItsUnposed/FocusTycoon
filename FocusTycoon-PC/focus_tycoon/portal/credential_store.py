@@ -23,6 +23,8 @@ class Credential:
         self.sync_error = sync_error
 
     def with_sync_meta(self, new_last_sync_at, new_sync_error):
+        # Build a fresh Credential instead of changing this one in place, so a
+        # caller holding the old object still sees the values it started with.
         return Credential(self.portal_type, self.username, self.password_enc, self.school_url,
                           new_last_sync_at, new_sync_error)
 
@@ -59,11 +61,15 @@ class CredentialStore:
             return result
         try:
             root = json.loads(self.file.read_text(encoding="utf-8"))
+            # The file might be missing, empty, or edited by hand, so do not trust its
+            # shape - only read it if it looks like what we expect.
             entries = root.get("credentials") if isinstance(root, dict) else None
             if isinstance(entries, list):
                 for item in entries:
                     if not isinstance(item, dict):
                         continue
+                    # "portalType" stores the stable wire id (see PortalType.wire),
+                    # not the enum member itself, so it can be turned back into one.
                     wire = _read_string(item.get("portalType"))
                     if not wire.strip():
                         continue
@@ -82,6 +88,8 @@ class CredentialStore:
     def _persist(self, all_credentials):
         try:
             self.file.parent.mkdir(parents=True, exist_ok=True)
+            # Turn each Credential object back into a plain dict, in the same
+            # shape load_all() reads, so it can be written out as JSON.
             data = {"credentials": [{
                 "portalType": credential.portal_type.wire,
                 "username": credential.username,

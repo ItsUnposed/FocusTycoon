@@ -65,7 +65,7 @@ class PortalConfig:
             key = "PORTAL_LOGINEO_USER"
         return self._values.get(key)
 
-    def demo_pass(self, portal_type):
+    def demo_password(self, portal_type):
         if portal_type == PortalType.ISERV:
             key = "PORTAL_ISERV_PASS"
         else:
@@ -83,6 +83,8 @@ def _read_env_file(file):
             if not line or line.startswith("#"):
                 continue
             equals_index = line.find("=")
+            # No "=" (-1) or an empty key (0) means this line is not a valid
+            # KEY=VALUE pair, so skip it.
             if equals_index <= 0:
                 continue
             name = line[:equals_index].strip()
@@ -94,7 +96,12 @@ def _read_env_file(file):
 
 
 def _strip_quotes(value):
-    if len(value) >= 2 and ((value.startswith('"') and value.endswith('"'))
-                            or (value.startswith("'") and value.endswith("'"))):
+    # A value in the .env file may be wrapped in matching quotes, e.g. KEY="value".
+    # If so, remove them; otherwise leave the value untouched.
+    if len(value) < 2:
+        return value
+    wrapped_in_double_quotes = value.startswith('"') and value.endswith('"')
+    wrapped_in_single_quotes = value.startswith("'") and value.endswith("'")
+    if wrapped_in_double_quotes or wrapped_in_single_quotes:
         return value[1:-1]
     return value

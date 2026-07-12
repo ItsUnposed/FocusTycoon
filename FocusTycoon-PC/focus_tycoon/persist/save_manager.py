@@ -36,8 +36,10 @@ class SaveManager:
         with self._lock:
             try:
                 self.save_file.unlink(missing_ok=True)
-                temp_file = self.save_file.with_name(self.save_file.name + ".tmp")
-                temp_file.unlink(missing_ok=True)
+                # save() below writes to a ".tmp" file first. If the app was
+                # closed mid-save, that leftover file needs cleaning up too.
+                temporary_file = self.save_file.with_name(self.save_file.name + ".tmp")
+                temporary_file.unlink(missing_ok=True)
             except Exception as error:
                 print(f"Could not delete the save game: {error}")
 
@@ -48,9 +50,12 @@ class SaveManager:
             try:
                 self.save_file.parent.mkdir(parents=True, exist_ok=True)
                 text = json.dumps(self._serialize(game, tycoon), ensure_ascii=False, indent=2)
-                temp_file = self.save_file.with_name(self.save_file.name + ".tmp")
-                temp_file.write_text(text, encoding="utf-8")
-                temp_file.replace(self.save_file)  # atomic rename
+                # Write to a temporary file first, then rename it into place.
+                # If the app crashes mid-write, the real save file is never
+                # left half-written.
+                temporary_file = self.save_file.with_name(self.save_file.name + ".tmp")
+                temporary_file.write_text(text, encoding="utf-8")
+                temporary_file.replace(self.save_file)  # atomic rename
             except Exception as error:
                 print(f"Could not save the game: {error}")
 
@@ -84,6 +89,7 @@ class SaveManager:
 
         inventory = {}
         for resource, amount in tycoon.inventory().snapshot().items():
+            # Skip resources the player has none of, to keep the save file small.
             if amount > 0:
                 inventory[resource.id] = round_to_three_decimals(amount)
 
@@ -123,6 +129,9 @@ class SaveManager:
             return None
 
     def _parse_quests(self, raw):
+        # The save file might be from an older version or slightly damaged,
+        # so every field is read defensively with a safe fallback value
+        # instead of trusting it and possibly crashing the app.
         result = []
         if not isinstance(raw, list):
             return result
@@ -136,12 +145,20 @@ class SaveManager:
             if isinstance(raw_stages, list):
                 for stage in raw_stages:
                     if isinstance(stage, dict):
+                        # Older save files might not have a "detail" field at
+                        # all, so fall back to an empty string instead of the
+                        # text "None".
+                        detail_value = stage.get("detail")
+                        if detail_value is None:
+                            detail = ""
+                        else:
+                            detail = str(detail_value)
                         stages.append(TaskData(
                             str(stage.get("title", "Step")),
                             self._read_int(stage.get("energyLevel"), energy_level),
                             self._read_int(stage.get("minutes"), 10),
                             stage.get("completed") is True,
-                            str(stage.get("detail", "")) if stage.get("detail") is not None else ""))
+                            detail))
             if stages:
                 result.append(QuestData(title, energy_level, stages))
         return result
@@ -169,6 +186,9 @@ class SaveManager:
         return TycoonData(inventory, sectors, generators, milestones)
 
     def _read_int(self, value, fallback):
+        # In Python, True and False also count as int/float values (1 and 0),
+        # so they are excluded here to avoid treating a stray "true"/"false"
+        # in the save file as a number.
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             return int(value)
         return fallback

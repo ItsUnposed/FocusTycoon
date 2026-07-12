@@ -15,6 +15,7 @@ try:
 except Exception:  # pragma: no cover - if time zone data is missing
     _BERLIN = timezone.utc
 
+# Matches a German-style date like "5.3.2026" or "05.03.26" anywhere in a text.
 _GERMAN_DATE = re.compile(r"(\d{1,2})\.(\d{1,2})\.(\d{2,4})")
 
 
@@ -46,8 +47,11 @@ def parse_german_date(raw):
     day = int(match.group(1))
     month = int(match.group(2))
     year = int(match.group(3))
+    # A 2-digit year (for example "26") means the 21st century, so make it "2026".
     if len(match.group(3)) == 2:
         year += 2000
+    # Reject values that cannot be a real date, so a typo does not turn into a
+    # silently wrong deadline.
     if day < 1 or day > 31 or month < 1 or month > 12 or year < 2000 or year > 2100:
         return ""
     return f"{year:04d}-{month:02d}-{day:02d}"

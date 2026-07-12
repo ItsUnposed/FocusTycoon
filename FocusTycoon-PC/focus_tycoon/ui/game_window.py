@@ -74,7 +74,7 @@ class GameWindow:
         self.page = PAGE_TASKS
         self.scroll_y = 0
         self.status = " "
-        self.recommended_task_id = -1
+        self.recommended_task_id = -1  # -1 means no task is currently recommended
         # Split level chosen in the composer: index into SPLIT_LEVELS (default = medium).
         self.split_choice_index = 2
         self.is_busy = False  # is a background AI call running right now?
@@ -143,6 +143,8 @@ class GameWindow:
         self.scroll_max = 0
         self.scrollbar_thumb = pygame.Rect(0, 0, 0, 0)
         self.scroll_dragging = False
+        # Where inside the thumb the mouse grabbed it, so dragging doesn't
+        # make the thumb jump to put its top under the cursor.
         self.scroll_drag_offset = 0
 
     # ---------- helpers for language / split labels ----------
@@ -152,6 +154,8 @@ class GameWindow:
                 translate("split_medium"), translate("split_coarse")]
 
     def _current_language_index(self, language_options):
+        # Find which dropdown entry matches the currently active language, so
+        # the dropdown can open already showing the right selection.
         current = i18n.get_language()
         for index, option in enumerate(language_options):
             if option[0] == current:
@@ -174,10 +178,12 @@ class GameWindow:
 
     def run(self):
         while self.running:
-            dt = self.clock.tick(60) / 1000.0
+            # Seconds since the last frame, used so widget animations (like the
+            # blinking text cursor) move at the same speed regardless of frame rate.
+            delta_time = self.clock.tick(60) / 1000.0
             events = pygame.event.get()
             self._pre_handle_events(events)
-            self._update(dt)
+            self._update(delta_time)
             self._draw()
             self._dispatch_events(events)
             pygame.display.flip()
@@ -187,6 +193,10 @@ class GameWindow:
     # ---------- events ----------
 
     def _pre_handle_events(self, events):
+        # This is an if/elif chain, so only the first matching branch runs for
+        # each event. That gives us a priority order: window-level events first,
+        # then whichever overlay/modal is open (it should eat all other input),
+        # then scrolling, and only then the normal page widgets.
         for event in events:
             if event.type == pygame.QUIT:
                 self.running = False
@@ -199,16 +209,19 @@ class GameWindow:
             elif self.tutorial_active or self.confirm_active:
                 pass  # overlays swallow the rest of the input
             elif self.modal_kind is not None:
+                # A modal is open: send typing/paste/etc. to its own fields
+                # instead of the fields on the page underneath it.
                 for text_field in self.modal_inputs:
                     text_field.handle_event(event)
                 if self.modal_segmented is not None:
                     self.modal_segmented.handle_event(event)
             elif event.type == pygame.MOUSEWHEEL and self.page == PAGE_TASKS:
+                # Clamp so the wheel can't scroll past the top or bottom of the list.
                 self.scroll_y = max(0, min(self.scroll_max, self.scroll_y - event.y * 40))
             elif event.type == pygame.MOUSEMOTION and self.scroll_dragging:
                 self._drag_scrollbar(event.pos[1])
             elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-                self.scroll_dragging = False
+                self.scroll_dragging = False  # released the mouse, stop dragging the thumb
             elif self.page == PAGE_TASKS:
                 self.title_input.handle_event(event)
                 self.description_input.handle_event(event)
@@ -217,6 +230,9 @@ class GameWindow:
 
     def _dispatch_events(self, events):
         for event in events:
+            # Clicks are handled here (after drawing), separately from
+            # _pre_handle_events, because we need this frame's button rects to
+            # know what was actually clicked. We only care about a left click.
             if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
                 continue
             position = event.pos
@@ -236,6 +252,9 @@ class GameWindow:
                 continue
 
             if self.page == PAGE_TASKS and self.scrollbar_thumb.collidepoint(position):
+                # Clicking the thumb starts a drag instead of clicking whatever is
+                # underneath it. Remember where inside the thumb we grabbed it, so
+                # the thumb doesn't jump to make its top land under the cursor.
                 self.scroll_dragging = True
                 self.scroll_drag_offset = position[1] - self.scrollbar_thumb.y
                 continue
@@ -267,12 +286,15 @@ class GameWindow:
         return pygame.Rect(0, NAVBAR_HEIGHT, self.width, self.height - NAVBAR_HEIGHT)
 
     def _resize(self, width, height):
+        # Never let the window shrink below a size where the layout would break.
         self.width = max(900, width)
         self.height = max(600, height)
         self.screen = pygame.display.set_mode((self.width, self.height), pygame.RESIZABLE)
 
     def _toggle_fullscreen(self):
         self.fullscreen = not self.fullscreen
+        # pygame needs a brand new display surface whenever the mode changes,
+        # so we always call set_mode() again instead of just flipping a flag.
         if self.fullscreen:
             self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
         else:
@@ -280,6 +302,9 @@ class GameWindow:
         self.width, self.height = self.screen.get_size()
 
     def _handle_escape(self):
+        # Escape closes whatever is currently "on top", checked in the same
+        # order things are drawn on top of each other: tutorial, then modal,
+        # then the reset confirmation, and only then leaves fullscreen.
         if self.tutorial_active:
             self.tutorial_active = False
         elif self.modal_kind is not None:
@@ -290,32 +315,43 @@ class GameWindow:
             self._toggle_fullscreen()
 
     def _drag_scrollbar(self, mouse_y):
+        # Convert the mouse's position while dragging into a scroll amount, the
+        # same way a normal scrollbar works: how far the thumb has moved along
+        # its track (as a fraction from 0 to 1) tells us how far to scroll.
         content_rect = self._content_rect()
         track_top = content_rect.y + 4
         track_height = content_rect.height - 8
+        # The thumb can only slide within the leftover space once its own
+        # height is subtracted from the track - that leftover is "usable".
         usable = track_height - self.scrollbar_thumb.height
         if usable <= 0 or self.scroll_max <= 0:
-            return
+            return  # nothing to scroll, or the track is too small to drag in
+        # Where the top of the thumb would be, relative to the top of the track,
+        # if we honor the offset recorded when the drag started.
         relative = (mouse_y - self.scroll_drag_offset) - track_top
         fraction = max(0.0, min(1.0, relative / usable))
         self.scroll_y = int(fraction * self.scroll_max)
 
     # ---------- update ----------
 
-    def _update(self, dt):
-        self.title_input.update(dt)
-        self.description_input.update(dt)
-        self.estimate_input.update(dt)
+    def _update(self, delta_time):
+        self.title_input.update(delta_time)
+        self.description_input.update(delta_time)
+        self.estimate_input.update(delta_time)
         for text_field in self.modal_inputs:
-            text_field.update(dt)
-        self.tycoon.update(dt)
+            text_field.update(delta_time)
+        self.tycoon.update(delta_time)
+        # Apply the results of any AI/network calls that finished since the last frame.
         self._drain_background_results()
 
-        self.save_timer += dt
+        self.save_timer += delta_time
         if self.save_timer >= 8.0:
             self.save_timer = 0.0
             self._save()
 
+        # Only show a hand cursor on the Tycoon page, and only when nothing else
+        # (a modal or the tutorial) is covering it, so it never lies about what
+        # is actually clickable right now.
         if self.page == PAGE_TYCOON and self.modal_kind is None and not self.tutorial_active:
             over_something = self.tycoon.is_over_interactive(pygame.mouse.get_pos())
             wanted = pygame.SYSTEM_CURSOR_HAND if over_something else pygame.SYSTEM_CURSOR_ARROW
@@ -327,6 +363,9 @@ class GameWindow:
             pass  # not available on some (headless) systems - harmless
 
     def _drain_background_results(self):
+        # Background threads cannot touch pygame or self.status directly, so they
+        # just drop their result in this queue. Here, on the main thread, we pick
+        # every finished job up and run its callback for real.
         while True:
             try:
                 on_done, result = self.background_results.get_nowait()
@@ -340,6 +379,8 @@ class GameWindow:
             try:
                 result = work()
             except Exception as error:  # noqa: BLE001
+                # Catch anything so a failed AI/network call cannot crash the whole
+                # app - the error is handed to on_done just like a normal result.
                 result = error
             self.background_results.put((on_done, result))
 
@@ -365,6 +406,8 @@ class GameWindow:
 
     def _draw_navbar(self):
         surface = self.screen
+        # Draw the navbar background one pixel-row at a time, blending a little
+        # further from NAVBAR to BG_ALT on each row, to fake a smooth gradient.
         for y in range(NAVBAR_HEIGHT):
             ratio = y / NAVBAR_HEIGHT
             surface.fill(theme.mix(theme.NAVBAR, theme.BG_ALT, ratio), (0, y, self.width, 1))
@@ -400,8 +443,11 @@ class GameWindow:
     def _draw_nav_buttons(self):
         surface = self.screen
         labels = [(translate("nav_tasks"), PAGE_TASKS), (translate("nav_tycoon"), PAGE_TYCOON)]
+        # Measure each label first so the pill background is exactly wide enough
+        # to fit both buttons (with padding), instead of using a fixed width.
         widths = [theme.text_width(text, 14, bold=True) + 44 for text, _ in labels]
         total = sum(widths) + 18
+        # Center the whole pill horizontally in the navbar.
         container = pygame.Rect((self.width - total) // 2, 12, total, 40)
         theme.rounded_rect(surface, container, theme.PANEL, 20, theme.STROKE, 1)
 
@@ -440,9 +486,14 @@ class GameWindow:
         y += 10
         y = self._draw_quest_lists(surface, margin, y, width, content_rect)
 
+        # Now that everything has been laid out once, we know the total content
+        # height, so we can work out how far scrolling is allowed to go.
         content_height = y + 20
         self.scroll_max = max(0, content_height - content_rect.height)
         if self.scroll_y > self.scroll_max:
+            # The content got shorter since the last frame (e.g. a task was
+            # completed and its card disappeared) - pull the scroll position
+            # back so we are not left looking at empty space.
             self.scroll_y = self.scroll_max
 
         surface.set_clip(None)
@@ -450,13 +501,18 @@ class GameWindow:
 
     def _draw_scrollbar(self, content_rect, content_height):
         if self.scroll_max <= 0:
+            # Everything fits on screen already, so there is no thumb to draw
+            # or click - make it an empty rect so nothing can collide with it.
             self.scrollbar_thumb = pygame.Rect(0, 0, 0, 0)
             return
         surface = self.screen
         track = pygame.Rect(self.width - 12, content_rect.y + 4, 8, content_rect.height - 8)
         theme.rounded_rect(surface, track, theme.BG_ALT, 4)
+        # The thumb's height mirrors how much of the content is visible at
+        # once (a short thumb means there is a lot more to scroll through).
         visible_fraction = content_rect.height / content_height
         thumb_height = max(30, int(track.height * visible_fraction))
+        # The thumb's position along the track mirrors how far we have scrolled.
         scroll_fraction = self.scroll_y / self.scroll_max
         thumb_y = track.y + int((track.height - thumb_height) * scroll_fraction)
         self.scrollbar_thumb = pygame.Rect(track.x, thumb_y, track.width, thumb_height)
@@ -464,6 +520,9 @@ class GameWindow:
         theme.rounded_rect(surface, self.scrollbar_thumb, color, 4)
 
     def _screen_y(self, content_y, content_rect):
+        # Everything on the tasks page is laid out using "content coordinates",
+        # as if nothing were ever scrolled. This converts one of those positions
+        # into the real on-screen position, by shifting it up by the scroll amount.
         return content_rect.y + content_y - self.scroll_y
 
     def _draw_composer(self, surface, x, content_y, width, content_rect):
@@ -472,60 +531,62 @@ class GameWindow:
 
         inner_x = card_rect.x + 22
         inner_width = card_rect.width - 44
-        cy = card_rect.y + 18
+        # cursor_y works like a pen moving down the card: we draw one row, then
+        # move the cursor down by that row's height before drawing the next one.
+        cursor_y = card_rect.y + 18
 
-        theme.draw_text(surface, translate("plan_new_task"), 18, theme.TEXT, inner_x, cy, bold=True)
-        cy += 28
-        theme.draw_text(surface, translate("composer_subtitle"), 13, theme.MUTED, inner_x, cy)
-        cy += 28
+        theme.draw_text(surface, translate("plan_new_task"), 18, theme.TEXT, inner_x, cursor_y, bold=True)
+        cursor_y += 28
+        theme.draw_text(surface, translate("composer_subtitle"), 13, theme.MUTED, inner_x, cursor_y)
+        cursor_y += 28
 
         # Title row: field + submit button.
-        theme.draw_text(surface, translate("title_label"), 13, theme.TEXT, inner_x, cy, bold=True)
-        cy += 24
+        theme.draw_text(surface, translate("title_label"), 13, theme.TEXT, inner_x, cursor_y, bold=True)
+        cursor_y += 24
         submit_text = translate("break_into_steps")
         submit_width = theme.text_width(submit_text, 13, bold=True) + 36
-        self.title_input.set_rect(pygame.Rect(inner_x, cy, inner_width - submit_width - 10, 44))
+        self.title_input.set_rect(pygame.Rect(inner_x, cursor_y, inner_width - submit_width - 10, 44))
         self.title_input.draw(surface)
-        submit_rect = pygame.Rect(inner_x + inner_width - submit_width, cy, submit_width, 44)
+        submit_rect = pygame.Rect(inner_x + inner_width - submit_width, cursor_y, submit_width, 44)
         self._add_button(submit_rect, submit_text, theme.ACCENT, (255, 255, 255),
                          self.on_split, enabled=not self.is_busy)
-        cy += 58
+        cursor_y += 58
 
         # Description.
-        theme.draw_text(surface, translate("description_label"), 13, theme.TEXT, inner_x, cy, bold=True)
-        cy += 24
-        self.description_input.set_rect(pygame.Rect(inner_x, cy, inner_width, 120))
+        theme.draw_text(surface, translate("description_label"), 13, theme.TEXT, inner_x, cursor_y, bold=True)
+        cursor_y += 24
+        self.description_input.set_rect(pygame.Rect(inner_x, cursor_y, inner_width, 120))
         self.description_input.draw(surface)
-        cy += 134
+        cursor_y += 134
 
         # Split selector: Do not split / Fine / Medium / Coarse.
-        theme.draw_text(surface, translate("split_label"), 13, theme.TEXT, inner_x, cy, bold=True)
-        cy += 26
-        self.split_control.draw(surface, inner_x, cy)
-        cy += 54
+        theme.draw_text(surface, translate("split_label"), 13, theme.TEXT, inner_x, cursor_y, bold=True)
+        cursor_y += 26
+        self.split_control.draw(surface, inner_x, cursor_y)
+        cursor_y += 54
 
         # Estimated time + AI estimate.
-        theme.draw_text(surface, translate("estimated_time_label"), 13, theme.TEXT, inner_x, cy, bold=True)
-        cy += 24
+        theme.draw_text(surface, translate("estimated_time_label"), 13, theme.TEXT, inner_x, cursor_y, bold=True)
+        cursor_y += 24
         estimate_button_text = translate("ai_estimate")
         estimate_button_width = theme.text_width(estimate_button_text, 13, bold=True) + 36
-        self.estimate_input.set_rect(pygame.Rect(inner_x, cy, inner_width - estimate_button_width - 10, 44))
+        self.estimate_input.set_rect(pygame.Rect(inner_x, cursor_y, inner_width - estimate_button_width - 10, 44))
         self.estimate_input.draw(surface)
-        estimate_rect = pygame.Rect(inner_x + inner_width - estimate_button_width, cy, estimate_button_width, 44)
+        estimate_rect = pygame.Rect(inner_x + inner_width - estimate_button_width, cursor_y, estimate_button_width, 44)
         self._add_button(estimate_rect, estimate_button_text, theme.CARD_HI, theme.TEXT,
                          self.on_estimate_time, enabled=not self.is_busy)
-        cy += 58
+        cursor_y += 58
 
         # Action row: recommend left, reset right.
         recommend_text = translate("what_first")
         recommend_width = theme.text_width(recommend_text, 13, bold=True) + 36
-        self._add_button(pygame.Rect(inner_x, cy, recommend_width, 44), recommend_text,
+        self._add_button(pygame.Rect(inner_x, cursor_y, recommend_width, 44), recommend_text,
                          theme.CARD_HI, theme.TEXT, self.on_recommend)
         reset_text = translate("reset_all")
         reset_width = theme.text_width(reset_text, 13, bold=True) + 36
-        self._add_button(pygame.Rect(inner_x + inner_width - reset_width, cy, reset_width, 44),
+        self._add_button(pygame.Rect(inner_x + inner_width - reset_width, cursor_y, reset_width, 44),
                          reset_text, theme.RESET_BG, theme.RESET_FG, self.on_reset_data)
-        cy += 54
+        cursor_y += 54
 
         # Import row (three buttons side by side).
         import_buttons = [
@@ -534,14 +595,16 @@ class GameWindow:
             (translate("sync_portal"), self.on_sync_portal, theme.CARD_HI, theme.TEXT),
         ]
         button_width = (inner_width - 6 * 2) // 3
-        bx = inner_x
+        # button_x is the same kind of cursor as cursor_y, but moving sideways
+        # across the row instead of down the card.
+        button_x = inner_x
         for label, action, background, foreground in import_buttons:
-            self._add_button(pygame.Rect(bx, cy, button_width, 40), label, background, foreground, action)
-            bx += button_width + 6
-        cy += 48
+            self._add_button(pygame.Rect(button_x, cursor_y, button_width, 40), label, background, foreground, action)
+            button_x += button_width + 6
+        cursor_y += 48
 
         # Status line.
-        theme.draw_text(surface, self.status, 12, theme.MUTED, inner_x, cy)
+        theme.draw_text(surface, self.status, 12, theme.MUTED, inner_x, cursor_y)
 
         return content_y + COMPOSER_HEIGHT
 
@@ -556,7 +619,8 @@ class GameWindow:
         done_quests = [quest for quest in self.game.get_quests() if quest.is_completed()]
 
         # Not-yet-split portal homework goes first (the hybrid inbox).
-        open_homework = [hw for hw in self.game.get_imported_homework() if not hw.decomposed]
+        open_homework = [homework_item for homework_item in self.game.get_imported_homework()
+                         if not homework_item.decomposed]
         for homework in open_homework:
             content_y = self._draw_homework_card(surface, x, content_y, width, homework, content_rect)
             content_y += 12
@@ -582,31 +646,38 @@ class GameWindow:
 
     def _draw_quest_group(self, surface, x, content_y, width, quest, content_rect):
         stage_count = quest.get_stage_count()
+        # We need the card's total height before we can draw its rounded
+        # background, so add up every part that goes inside it: top/bottom
+        # padding, the title row, the progress bar and its spacing, and then
+        # one stage card per step (with a small gap between each of them).
         group_height = 16 * 2 + 22 + 10 + 9 + 12 + stage_count * STAGE_HEIGHT + max(0, stage_count - 1) * 8
         group_rect = pygame.Rect(x, self._screen_y(content_y, content_rect), width, group_height)
         theme.rounded_rect(surface, group_rect, theme.CARD, 16, theme.STROKE, 1)
 
         inner_x = group_rect.x + 18
         inner_width = group_rect.width - 36
-        gy = group_rect.y + 16
+        # cursor_y tracks where to draw next, moving down the card step by step.
+        cursor_y = group_rect.y + 16
 
-        theme.draw_text(surface, quest.title, 16, theme.TEXT, inner_x, gy, bold=True)
+        theme.draw_text(surface, quest.title, 16, theme.TEXT, inner_x, cursor_y, bold=True)
         progress_text = f"{quest.get_completed_count()} / {quest.get_stage_count()}"
         progress_color = theme.SUCCESS if quest.is_completed() else theme.MUTED
         progress_width = theme.text_width(progress_text, 13, bold=True)
         theme.draw_text(surface, progress_text, 13, progress_color,
-                        inner_x + inner_width - progress_width, gy + 2, bold=True)
-        gy += 32
+                        inner_x + inner_width - progress_width, cursor_y + 2, bold=True)
+        cursor_y += 32
 
-        self._draw_progress_bar(surface, inner_x, gy, inner_width,
+        self._draw_progress_bar(surface, inner_x, cursor_y, inner_width,
                                 quest.get_completed_count(), quest.get_stage_count())
-        gy += 21
+        cursor_y += 21
 
         stages = quest.get_stages()
         for index, task in enumerate(stages):
+            # The "recommended" tag only shows on the one task the recommend
+            # button pointed at, and only while it is still unfinished.
             is_recommended = task.id == self.recommended_task_id and not task.completed
-            self._draw_stage_card(surface, inner_x, gy, inner_width, task, index, len(stages), is_recommended)
-            gy += STAGE_HEIGHT + 8
+            self._draw_stage_card(surface, inner_x, cursor_y, inner_width, task, index, len(stages), is_recommended)
+            cursor_y += STAGE_HEIGHT + 8
 
         return content_y + group_height
 
@@ -620,6 +691,8 @@ class GameWindow:
         arrow_x = card.x + 12
         up_rect = pygame.Rect(arrow_x, card.y + 14, 30, 20)
         down_rect = pygame.Rect(arrow_x, card.y + 40, 30, 20)
+        # You can't move a step above the first one or below the last one, and
+        # a finished step can no longer be reordered at all.
         up_enabled = index > 0 and not task.completed
         down_enabled = index < count - 1 and not task.completed
         self._draw_arrow_button(surface, up_rect, "▲", up_enabled, task.id, True)
@@ -675,6 +748,8 @@ class GameWindow:
             else:
                 def do_move():
                     self.on_move_down(task_id)
+            # We already drew the arrow glyph ourselves above, so this just
+            # registers an invisible, same-colored button over it to catch clicks.
             self._add_button(rect, "", color, color, do_move, draw=False)
 
     def _draw_done_card(self, surface, x, content_y, width, quest, content_rect):
@@ -684,6 +759,7 @@ class GameWindow:
         theme.draw_text(surface, "✓", 24, theme.SUCCESS, card.x + 18, card.centery - 16, bold=True)
         info_x = card.x + 54
         theme.draw_text(surface, quest.title, 15, theme.TEXT, info_x, card.y + 12, bold=True)
+        # Add up the gold reward from every step to show the total this quest earned.
         earned = sum(task.gold_reward for task in quest.get_stages())
         subtitle = translate("steps_done_earned").format(count=quest.get_stage_count(), gold=earned)
         theme.draw_text(surface, subtitle, 12, theme.MUTED, info_x, card.y + 34)
@@ -720,9 +796,12 @@ class GameWindow:
     def _draw_progress_bar(self, surface, x, y, width, done, total):
         height = 9
         theme.rounded_rect(surface, pygame.Rect(x, y, width, height), theme.BG_ALT, height // 2)
+        # A quest with zero stages would otherwise divide by zero here.
         fraction = 0 if total == 0 else done / total
         fill_width = int(width * fraction)
         if done > 0:
+            # Even a tiny fraction should still show a visible sliver of fill
+            # (a rounded bar that is thinner than it is tall looks broken).
             fill_width = max(fill_width, height)
             color = theme.SUCCESS if done >= total else theme.ACCENT
             theme.rounded_rect(surface, pygame.Rect(x, y, min(fill_width, width), height), color, height // 2)
@@ -740,6 +819,8 @@ class GameWindow:
 
     def _draw_confirm_overlay(self):
         surface = self.screen
+        # A semi-transparent black rectangle over the whole window, so the page
+        # underneath is still visible but clearly "disabled" behind the popup.
         veil = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
         veil.fill((0, 0, 0, 150))
         surface.blit(veil, (0, 0))
@@ -750,10 +831,11 @@ class GameWindow:
 
         theme.draw_text(surface, translate("reset_title"), 20, theme.TEXT, box.x + 28, box.y + 24, bold=True)
         lines = [translate("reset_confirm"), "", translate("reset_warning1"), translate("reset_warning2")]
-        ty = box.y + 62
+        # cursor_y walks down the box, one text line at a time.
+        cursor_y = box.y + 62
         for line in lines:
-            theme.draw_text(surface, line, 13, theme.MUTED, box.x + 28, ty)
-            ty += 22
+            theme.draw_text(surface, line, 13, theme.MUTED, box.x + 28, cursor_y)
+            cursor_y += 22
 
         self.confirm_no_rect = pygame.Rect(box.right - 260, box.bottom - 58, 110, 38)
         self.confirm_yes_rect = pygame.Rect(box.right - 140, box.bottom - 58, 120, 38)
@@ -784,6 +866,8 @@ class GameWindow:
         surface.blit(veil, (0, 0))
 
         pages = i18n.get_tutorial_pages()
+        # Defensive clamp: if the language changed and the new tutorial has
+        # fewer pages, don't let the page index point past the last one.
         if self.tutorial_page >= len(pages):
             self.tutorial_page = len(pages) - 1
         page = pages[self.tutorial_page]
@@ -795,10 +879,11 @@ class GameWindow:
         theme.draw_text(surface, page["title"], 22, theme.TEXT, box.x + 32, box.y + 26, bold=True)
         theme.draw_text(surface, f"{self.tutorial_page + 1} / {len(pages)}", 12, theme.MUTED,
                         box.right - 70, box.y + 32)
-        ty = box.y + 72
+        # cursor_y walks down the box, one text line at a time.
+        cursor_y = box.y + 72
         for line in page["lines"]:
-            theme.draw_text(surface, line, 14, theme.MUTED, box.x + 32, ty)
-            ty += 26
+            theme.draw_text(surface, line, 14, theme.MUTED, box.x + 32, cursor_y)
+            cursor_y += 26
 
         self.tutorial_buttons = []
         mouse_pos = pygame.mouse.get_pos()
@@ -885,6 +970,8 @@ class GameWindow:
         self.modal_submit = None
 
     def _confirm_modal(self):
+        # Grab the submit callback before closing, since closing clears
+        # self.modal_submit to None - then run it after the modal is gone.
         submit = self.modal_submit
         self._close_modal()
         if submit is not None:
@@ -896,6 +983,9 @@ class GameWindow:
         veil.fill((0, 0, 0, 150))
         surface.blit(veil, (0, 0))
 
+        # This one dialog box is reused for both the calendar and portal
+        # modals, which need different amounts of space - so its height is
+        # calculated from how many fields, and which optional parts, it has.
         field_count = len(self.modal_inputs)
         extra = 78 if self.modal_segmented is not None else 0
         hint_extra = 24 if self.modal_hint else 0
@@ -905,25 +995,26 @@ class GameWindow:
 
         inner_x = box.x + 28
         inner_width = box.width - 56
-        cy = box.y + 24
-        theme.draw_text(surface, self.modal_title, 20, theme.TEXT, inner_x, cy, bold=True)
-        cy += 34
+        # cursor_y walks down the box as we draw each part, same as elsewhere.
+        cursor_y = box.y + 24
+        theme.draw_text(surface, self.modal_title, 20, theme.TEXT, inner_x, cursor_y, bold=True)
+        cursor_y += 34
         if self.modal_hint:
-            theme.draw_text(surface, self.modal_hint, 12, theme.MUTED, inner_x, cy)
-            cy += 24
+            theme.draw_text(surface, self.modal_hint, 12, theme.MUTED, inner_x, cursor_y)
+            cursor_y += 24
 
         if self.modal_segmented is not None:
-            theme.draw_text(surface, self.modal_segmented_label, 13, theme.TEXT, inner_x, cy, bold=True)
-            cy += 26
-            self.modal_segmented.draw(surface, inner_x, cy)
-            cy += 52
+            theme.draw_text(surface, self.modal_segmented_label, 13, theme.TEXT, inner_x, cursor_y, bold=True)
+            cursor_y += 26
+            self.modal_segmented.draw(surface, inner_x, cursor_y)
+            cursor_y += 52
 
         for label, text_field in zip(self.modal_labels, self.modal_inputs):
-            theme.draw_text(surface, label, 13, theme.TEXT, inner_x, cy, bold=True)
-            cy += 24
-            text_field.set_rect(pygame.Rect(inner_x, cy, inner_width, 44))
+            theme.draw_text(surface, label, 13, theme.TEXT, inner_x, cursor_y, bold=True)
+            cursor_y += 24
+            text_field.set_rect(pygame.Rect(inner_x, cursor_y, inner_width, 44))
             text_field.draw(surface)
-            cy += 54
+            cursor_y += 54
 
         confirm_text = translate("confirm")
         cancel_text = translate("cancel")
@@ -948,6 +1039,10 @@ class GameWindow:
         description = self.description_input.text.strip()
         split_level = SPLIT_LEVELS[self.split_choice_index]
         minutes = self._parse_minutes(self.estimate_input.text)
+        # is_busy disables the split/estimate buttons (see _draw_composer) while
+        # this call is running, so the user can't fire off a second AI request
+        # before the first one is done. The actual call runs on a background
+        # thread (see _run_in_background) so the window keeps responding.
         self.is_busy = True
         self.status = "Splitting the task ..."
 
@@ -1008,6 +1103,9 @@ class GameWindow:
         self.game.move_stage_down(task_id)
 
     def on_complete_task(self, task_id):
+        # Check whether the quest was already fully done before this step, so
+        # afterwards we can tell the difference between "just one more step
+        # done" and "that was the last step - the whole quest just finished".
         quest = self.game.find_quest_containing(task_id)
         was_complete = quest.is_completed() if quest is not None else False
         if self.game.complete_task(task_id):
@@ -1044,6 +1142,8 @@ class GameWindow:
         if not source:
             self.status = "Please enter a file path or a subscription URL."
             return
+        # The user can point us at either a local .ics file or a calendar
+        # subscription URL - tell them apart by how the text starts.
         is_url = source.lower().startswith(("http://", "https://", "webcal://"))
         self.status = "Loading the calendar ..."
 
@@ -1103,10 +1203,17 @@ class GameWindow:
         if self.portal_sync is None:
             return
         if not self.credential_store.load_all():
+            # No saved logins yet, so there is nothing to sync automatically.
             self.portal_sync.stop_auto_sync()
             return
 
         def on_result(result):
+            # This callback runs on the portal sync's own background thread, so
+            # it cannot touch self.status directly. We reuse the same
+            # background_results queue as our other background work, which
+            # picks jobs up on the main thread. The queue always calls its
+            # callback with one argument, but we already have "result" from the
+            # closure above, so "apply" just ignores the argument it is given.
             def apply(_ignored):
                 if result.has_changes() or result.messages:
                     self.status = "Portal auto-sync: " + result.summarize()
@@ -1210,8 +1317,12 @@ class GameWindow:
     # ---------- small helpers ----------
 
     def _split_level_name(self, energy_level):
+        # energy_level is stored as 1 (fine), 2 (medium) or 3 (coarse). Clamp it
+        # into that range first in case older save data has something outside
+        # it, then shift down by one to get a valid list index (0, 1 or 2).
         index = max(1, min(3, energy_level)) - 1
-        return [translate("split_fine"), translate("split_medium"), translate("split_coarse")][index]
+        level_names = [translate("split_fine"), translate("split_medium"), translate("split_coarse")]
+        return level_names[index]
 
     def _shorten(self, text, max_chars):
         if len(text) <= max_chars:

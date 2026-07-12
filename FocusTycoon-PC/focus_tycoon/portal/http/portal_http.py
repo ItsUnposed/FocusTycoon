@@ -84,12 +84,16 @@ def url_encode(value):
 # ---------- internal ----------
 
 def _send(url, method, jar, referer=None, content_type=None, body=None):
+    # http.client needs the path and query as one string, but urlsplit() returns
+    # them separately, so put them back together here.
     parts = urlsplit(url)
     path = parts.path or "/"
     if parts.query:
         path += "?" + parts.query
 
     headers = {"User-Agent": USER_AGENT, "Accept": "text/html"}
+    # Send back whatever cookies we collected so far, so the server recognizes
+    # our session (login, CSRF token, etc).
     cookie_header = str(jar)
     if cookie_header:
         headers["Cookie"] = cookie_header
@@ -98,6 +102,7 @@ def _send(url, method, jar, referer=None, content_type=None, body=None):
     if content_type:
         headers["Content-Type"] = content_type
 
+    # Pick the plain or TLS connection class based on the URL's scheme.
     if parts.scheme == "https":
         connection = http.client.HTTPSConnection(parts.hostname, parts.port or 443, timeout=_REQUEST_TIMEOUT)
     else:
@@ -107,12 +112,17 @@ def _send(url, method, jar, referer=None, content_type=None, body=None):
         body_bytes = body.encode("utf-8") if body is not None else None
         connection.request(method, path, body=body_bytes, headers=headers)
         response = connection.getresponse()
+        # "replace" swaps any byte that is not valid UTF-8 for a placeholder
+        # character instead of raising an error - a broken page should not crash
+        # a sync.
         text = response.read().decode("utf-8", "replace")
         message = response.msg
         status = response.status
     finally:
         connection.close()
 
+    # Every response can set new cookies (session id, CSRF token, ...), so store
+    # them for the next request.
     jar.extract(message.get_all("set-cookie") or [])
     return PortalResponse(status, message, text)
 

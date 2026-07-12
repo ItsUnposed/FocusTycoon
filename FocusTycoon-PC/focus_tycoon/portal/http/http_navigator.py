@@ -14,10 +14,15 @@ from .cookie_jar import CookieJar
 
 DEFAULT_MAX_HOPS = 25
 
+# Matches a URL that points back to the IServ login page - if we ever land here
+# again after trying to reach a protected page, that means the login was rejected.
 _LOGIN_BOUNCE = re.compile(r"/iserv/auth/login(\?|$)")
+# Matches an HTML <meta http-equiv="refresh" content="0;url=..."> tag, which some
+# pages use instead of a proper HTTP redirect to send the browser onward.
 _META_REFRESH = re.compile(
     r"""<meta[^>]+http-equiv=["']refresh["'][^>]*content=["']\s*\d+\s*;\s*url=([^"']+)["']""",
     re.IGNORECASE)
+# The standard HTTP status codes that mean "go to another URL".
 _REDIRECT_CODES = {301, 302, 303, 307, 308}
 
 

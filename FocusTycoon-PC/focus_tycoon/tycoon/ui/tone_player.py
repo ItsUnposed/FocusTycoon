@@ -40,15 +40,24 @@ _CUES = {
 
 
 def _render_tone(frequency_hz, duration_seconds, sparkle, volume):
+    """Build one short tone as raw 16-bit audio samples, entirely in code (no sound file)."""
     sample_count = int(_SAMPLE_RATE * duration_seconds)
+    # A short fade in and out at the start/end of the tone, so it does not start or
+    # stop with an audible "click".
     fade = max(1, sample_count // 8)
     buffer = bytearray(sample_count * 2)
     for i in range(sample_count):
         time_position = i / _SAMPLE_RATE
+        # envelope ramps from 0 up to 1 near the start, stays at 1 in the middle, then
+        # ramps back down to 0 near the end (the fade-in / fade-out mentioned above).
         envelope = min(1.0, min(i / fade, (sample_count - i) / fade))
+        # A plain sine wave is the base tone.
         wave = math.sin(2 * math.pi * frequency_hz * time_position)
         if sparkle:
+            # Mix in a quieter tone at double the frequency (one octave up) to give the
+            # sound a brighter, "sparkly" character.
             wave = 0.7 * wave + 0.3 * math.sin(2 * math.pi * frequency_hz * 2 * time_position)
+        # Scale the wave into the 16-bit sample range and apply volume settings.
         sample = int(wave * envelope * 32767 * volume * _MASTER_VOLUME)
         sample = max(-32768, min(32767, sample))
         struct.pack_into("<h", buffer, 2 * i, sample)
@@ -72,6 +81,8 @@ class TonePlayer(SoundEffectSink):
         if not self._alive or not self._available:
             return
         try:
+            # Join the tones one after another into a single buffer, so a "cue" made
+            # of several notes plays as one short flourish instead of separate sounds.
             buffer = bytearray()
             for frequency, duration, sparkle, volume in tones:
                 buffer += _render_tone(frequency, duration, sparkle, volume)

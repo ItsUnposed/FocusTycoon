@@ -40,6 +40,9 @@ class TycoonPanel:
         self._screen_shaker = ScreenShaker()
         self._bus.subscribe(JuiceDirector(self._particle_layer, self._tone_player, self._screen_shaker))
 
+        # This function is handed to GameLoop and runs on its background
+        # thread (see core.py), separate from the pygame render loop, so it
+        # must stay lightweight and only touch thread-safe state.
         def tick(elapsed_seconds):
             production_system.tick(elapsed_seconds, self.state, self._bus)
             milestone_system.tick(self.state, self._bus)
@@ -58,8 +61,8 @@ class TycoonPanel:
 
     # ---------- frame ----------
 
-    def update(self, dt):
-        self._map_view.update(dt)
+    def update(self, elapsed_seconds):
+        self._map_view.update(elapsed_seconds)
 
     def render(self, surface, rect):
         # HUD strip on top, the map below it.

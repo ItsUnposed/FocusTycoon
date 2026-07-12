@@ -34,6 +34,8 @@ class LiveParticle:
 
 
 def _seed_radial(particle, origin_x, origin_y, min_speed, max_speed):
+    # Pick a random direction and speed so the particle flies outward from the
+    # origin point, like an explosion or burst.
     angle = random.uniform(0, math.pi * 2)
     speed = random.uniform(min_speed, max_speed)
     particle.x = origin_x
@@ -43,6 +45,8 @@ def _seed_radial(particle, origin_x, origin_y, min_speed, max_speed):
 
 
 def _jitter_color(base_color):
+    # Nudge each color channel by a small random amount so a burst of particles
+    # is not all the exact same shade, which looks more natural.
     spread = 22
     return (max(0, min(255, base_color[0] + random.randint(-spread, spread))),
             max(0, min(255, base_color[1] + random.randint(-spread, spread))),
@@ -73,9 +77,11 @@ class ParticleLayer:
     def spawn_burst(self, request: ParticleEffectRequest):
         tile_size = self._tile_size
         if request.position is not None:
+            # A grid position was given: burst from the center of that tile.
             origin_x = request.position.grid_x * tile_size + tile_size / 2.0
             origin_y = request.position.grid_y * tile_size + tile_size / 2.0
         else:
+            # No grid position (for example a whole-map celebration): burst from the center of the view.
             origin_x = self._fallback_width / 2.0
             origin_y = self._fallback_height / 2.0
 
@@ -91,28 +97,34 @@ class ParticleLayer:
             particle.color = _jitter_color(base_color)
             style = request.style
             if style == ParticleStyle.MAGIC_DUST:
+                # Negative gravity makes the dust drift slowly upward instead of falling.
                 _seed_radial(particle, origin_x, origin_y, 15, 55)
                 particle.vy -= 30
                 particle.gravity = -12
                 particle.size = random.uniform(3, 6)
                 particle.max_life = random.uniform(0.5, 1.1)
             elif style == ParticleStyle.SPARKLE:
+                # Small, short-lived, and pulled down by normal gravity for a quick "flick" look.
                 _seed_radial(particle, origin_x, origin_y, 20, 70)
                 particle.gravity = 40
                 particle.size = random.uniform(2, 4)
                 particle.max_life = random.uniform(0.25, 0.5)
             elif style == ParticleStyle.GLOW_PULSE:
+                # No gravity: the glow just expands outward and fades in place.
                 _seed_radial(particle, origin_x, origin_y, 8, 45)
                 particle.gravity = 0
                 particle.size = random.uniform(5, 9)
                 particle.max_life = random.uniform(0.4, 0.8)
             elif style == ParticleStyle.EMBER:
+                # Like magic dust, embers rise (negative gravity) to look like sparks from a fire.
                 _seed_radial(particle, origin_x, origin_y, 10, 40)
                 particle.vy -= 40
                 particle.gravity = -20
                 particle.size = random.uniform(2, 5)
                 particle.max_life = random.uniform(0.5, 1.0)
             elif style == ParticleStyle.RUNE_RING:
+                # Fly straight outward at a fixed speed range (no radial-speed helper reuse here
+                # because the speed range and lack of extra vertical push differ from a normal burst).
                 angle = random.uniform(0, math.pi * 2)
                 speed = random.uniform(90, 140)
                 particle.x = origin_x
@@ -124,11 +136,14 @@ class ParticleLayer:
                 particle.square = True
                 particle.spin = random.uniform(-6, 6)
             elif style == ParticleStyle.STARBURST:
+                # Fast outward burst that falls back down, like fireworks.
                 _seed_radial(particle, origin_x, origin_y, 80, 220)
                 particle.gravity = 30
                 particle.size = random.uniform(3, 7)
                 particle.max_life = random.uniform(0.6, 1.2)
             elif style == ParticleStyle.CONFETTI:
+                # Confetti is not tied to a single origin point: spawn it spread across the
+                # top of the screen so it rains down over the whole view.
                 particle.x = origin_x + random.uniform(-self._fallback_width / 2.0, self._fallback_width / 2.0)
                 particle.y = origin_y + random.uniform(-self._fallback_height / 2.0, -self._fallback_height / 6.0)
                 particle.vx = random.uniform(-30, 30)
@@ -138,6 +153,7 @@ class ParticleLayer:
                 particle.max_life = random.uniform(1.2, 2.2)
                 particle.square = True
                 particle.spin = random.uniform(-8, 8)
+            # Start each particle at full life; life counts down to 0 in update().
             particle.life = particle.max_life
             new_particles.append(particle)
 
@@ -147,11 +163,14 @@ class ParticleLayer:
     def update(self, dt_seconds):
         with self._lock:
             for particle in self._particles:
+                # Move the particle by its current velocity, then let gravity change
+                # that velocity over time (pulling down, or pushing up if negative).
                 particle.x += particle.vx * dt_seconds
                 particle.y += particle.vy * dt_seconds
                 particle.vy += particle.gravity * dt_seconds
                 particle.angle += particle.spin * dt_seconds
                 particle.life -= dt_seconds
+            # Remove particles once their life has run out.
             self._particles = [p for p in self._particles if p.life > 0]
 
     def paint(self, surface, offset=(0, 0)):
@@ -159,6 +178,8 @@ class ParticleLayer:
             particles = list(self._particles)
         offset_x, offset_y = offset
         for particle in particles:
+            # Fade the particle out as its life runs down, so it disappears smoothly
+            # instead of popping out of existence.
             if particle.max_life > 0:
                 life_fraction = max(0.0, min(1.0, particle.life / particle.max_life))
             else:
@@ -170,12 +191,16 @@ class ParticleLayer:
             screen_y = particle.y + offset_y
             core_size = max(1, int(particle.size))
             glow_size = int(particle.size * 2.4)
+            # Draw onto a small temporary surface first, sized to fit the glow, so the
+            # soft glow and the solid core can both use partial transparency.
             span = max(glow_size, core_size) * 2 + 4
             temp_surface = pygame.Surface((span, span), pygame.SRCALPHA)
             center = temp_surface.get_rect().center
+            # Soft, dim glow behind the particle.
             glow_color = (particle.color[0], particle.color[1], particle.color[2], round(alpha * 0.28))
             pygame.draw.circle(temp_surface, glow_color, center, glow_size)
             if particle.square:
+                # Square particles (confetti, rune ring pieces) are rotated to show their spin.
                 core = pygame.Surface((core_size * 2, core_size * 2), pygame.SRCALPHA)
                 core.fill((particle.color[0], particle.color[1], particle.color[2], alpha))
                 if abs(particle.angle) > 1e-3:
