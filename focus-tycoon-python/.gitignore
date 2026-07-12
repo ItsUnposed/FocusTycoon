@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Test / render artefacts
+shot_*.png
+
+# Local secrets - never commit these
+.env
+portal.env
+portal-credentials.json

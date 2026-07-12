@@ -1,0 +1,16 @@
+# Focus Tycoon (Python-Port)
+# Nur eine echte Laufzeit-Abhaengigkeit: die 2D-Engine.
+#
+# pygame-ce (Community Edition) hat Wheels fuer aktuelle Python-Versionen (inkl.
+# 3.14); es ist API-kompatibel und wird als "import pygame" eingebunden. Auf
+# aelteren Python-Versionen funktioniert alternativ auch das klassische "pygame>=2.5".
+pygame-ce>=2.5
+
+# Gemini/HTTP + ICS-Download laufen ueber die Standardbibliothek (urllib),
+# daher keine weiteren Pakete noetig.
+
+# Nur fuer die Schul-Portal-Anbindung (Logineo/IServ): AES-256-GCM zum
+# Verschluesseln der gespeicherten Zugangsdaten. Nutzt abi3-Wheels, laeuft also
+# auch auf neuen Python-Versionen. Ohne dieses Paket funktioniert die App weiter,
+# nur die Portal-Anbindung ist dann deaktiviert.
+cryptography>=42
