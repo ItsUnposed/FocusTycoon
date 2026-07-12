@@ -1,67 +1,95 @@
-# Focus Tycoon
+# Focus Tycoon — Python / pygame
 
-## Für Menschen mit ADHS fühlt sich der Alltag manchmal an wie ein Spiel ohne Tutorial
+Turn your real tasks into a game. On the **Tasks** page you type a big task and the
+AI (Google Gemini) splits it into small steps by how much you want to split it;
+finishing a step earns **gold**. On the **Tycoon** page you spend that same gold to
+grow a world of floating islands.
 
-Man sieht eine große Aufgabe vor sich, kennt das Ziel, weiß aber nicht genau, welcher Schritt der erste sein soll. 
-Während andere einfach anfangen können, wirkt der Einstieg oft wie eine unübersichtliche Herausforderung. Nicht die Aufgabe selbst ist immer das Problem, sondern der fehlende Überblick.
+The app defaults to **German**, with a **language dropdown (Deutsch / English)** at the
+top to switch. The source code itself is always written in English (see `CLAUDE.md`).
 
-## Zielgruppe & Problem
+## Start
 
-**Focus Tycoon** richtet sich an Schülerinnen und Schüler mit ADHS, die Unterstützung bei Organisation, Motivation und dem Umgang mit größeren Aufgaben benötigen.
+Easiest: double-click **`start.bat`** (Windows). It installs the dependencies on the
+first run and opens the game.
 
-Viele Betroffene haben Schwierigkeiten damit, umfangreiche Aufgaben zu beginnen oder über längere Zeit an ihnen dranzubleiben. Eine große Aufgabe kann schnell überwältigend wirken, weil viele einzelne Schritte gleichzeitig bedacht werden müssen. Dadurch werden Aufgaben häufig aufgeschoben, obwohl die Motivation grundsätzlich vorhanden ist.
+Manually:
 
-Herkömmliche To-do-Apps helfen zwar dabei, Aufgaben zu sammeln und zu verwalten, lösen aber oft nicht das eigentliche Problem: Sie zeigen hauptsächlich, was noch erledigt werden muss, machen aber selten sichtbar, was bereits erreicht wurde.
+```bat
+pip install -r requirements.txt
+python run.py
+```
 
-## Unsere Idee
+Console demo of the split-level weighting (no window):
 
-**Focus Tycoon** macht aus Aufgaben kleine erreichbare Schritte und verbindet Produktivität mit den motivierenden Elementen eines Spiels.
+```bat
+python run.py demo
+```
 
-Mithilfe der **Gemini API** werden große Aufgaben automatisch in kleinere **Micro-Tasks** aufgeteilt. Dadurch erhalten Nutzer eine klare Struktur und können Aufgaben Schritt für Schritt bearbeiten, anstatt von der gesamten Aufgabe überwältigt zu werden.
+## AI key (required for splitting)
 
-Für jede erledigte Aufgabe erhalten Nutzer Münzen. Diese können genutzt werden, um ihren eigenen virtuellen **Tycoon** auszubauen und weiterzuentwickeln. Jeder Fortschritt innerhalb der App steht dabei für Fortschritt im echten Leben.
+There is **no offline fallback** any more: the app always uses the real AI. If it
+cannot be reached it retries for one minute and then shows a clear error.
 
----
+Set a free Google Gemini key so splitting works:
 
-## Kernfunktionen
+1. Get a key at <https://aistudio.google.com/app/apikey>.
+2. Copy `.env.example` to `.env`.
+3. Put your key after `GEMINI_API_KEY=` in `.env`.
 
-### KI-gestützte Micro-Tasks
+`.env` stays on your computer and is git-ignored, so no key ends up on GitHub.
 
-Die **Gemini API** zerlegt komplexe Aufgaben automatisch in kleinere, verständliche Teilaufgaben.
+## Controls
 
-### Aufgabenmanagement
+- **Navbar:** switch between *Tasks* and *Tycoon*, open the **Tutorial**, pick the
+  **language**.
+- **Tasks:** type a title (+ optional description), choose **How much to split**
+  (*Do not split (1 task)* / *Fine* / *Medium* / *Coarse*) and press **Submit**
+  ("Break into steps"). Tick *Done* on a step to earn gold.
+- **Tycoon:** click a producer's disc to **cheer** it (costs gold, fills the tank).
+  Click the button below a producer to **upgrade** it (costs resources, never gold).
+  Click a locked island to unlock it (costs gold).
+- **F11** toggles fullscreen; the window is resizable; **Esc** closes a dialog or
+  leaves fullscreen; a scrollbar (or the mouse wheel) scrolls the tasks page.
 
-Nutzer können Aufgaben erstellen, organisieren und Schritt für Schritt abarbeiten.
+## School portal (Logineo NRW / IServ)
 
-### Belohnungssystem
+Optional. Homework from the portal shows up as a "portal homework" card that you can
+split on demand. **One login covers both portals** (same username and password, two
+URLs). Passwords are stored only in encrypted form (AES-256-GCM).
 
-Erledigte Aufgaben werden durch Münzen belohnt, wodurch Fortschritt direkt sichtbar wird.
+1. Copy `portal.env.example` to `portal.env` (or put it in `~/.focustycoon/`).
+2. Set `PORTAL_ENCRYPTION_KEY` to a long random string.
+3. In the app press **Connect portal**, fill in the username, password and the
+   Logineo and/or IServ URL, then **Sync portal**.
 
-### Eigener Tycoon & Level-System
+## Balancing
 
-Gesammelte Münzen können verwendet werden, um den eigenen Tycoon auszubauen und neue Fortschritte freizuschalten.
+The economy is tuned so that fully maxing out the Tycoon takes about **50 to 100
+days** of active play at 1–2 finished tasks per day. Cheering is expensive and the
+tank burns slowly; upgrades cost produced resources. Producers only ever spend
+resources on an **upgrade** — starting or cheering a producer never removes resources.
 
-### Gamifizierte Produktivität
+## Layout
 
-Focus Tycoon kombiniert Aufgabenmanagement mit Spielmechaniken, um Motivation und Durchhaltevermögen zu unterstützen.
+| Folder | Contents |
+|--------|----------|
+| `model/` | Task, Quest, GameState, calendar / homework data |
+| `service/` | Gemini task splitting, ICS calendar import |
+| `persist/` | Saving / loading |
+| `portal/` | School-portal scraper (Logineo / IServ), encrypted credentials |
+| `tycoon/` | Tycoon engine (model, simulation, juice) + the pygame map / HUD |
+| `ui/` | Navbar + tasks page + embedded Tycoon page |
+| `util/` | .env reader, Java-compatible hash, fonts |
+| `i18n.py` | English / German text and the tutorial pages |
 
----
+## Roadmap
 
-## Technische Umsetzung
+Planned work and known rough edges are tracked in [`TODO.md`](TODO.md).
 
-**Technologien:**
+## Notes
 
-* Python
-* Gemini API
-* Gamification-System mit Münzen, Leveln und Fortschrittssystem
-
----
-
-## Vision
-
-Focus Tycoon soll helfen, Aufgaben anders wahrzunehmen:
-
-**Nicht: Eine große Aufgabe bewältigen.
-Sondern: Viele kleine Schritte abschließen.**
-
-Durch klare nächste Schritte und sichtbaren Fortschritt wird Produktivität einfacher, strukturierter und motivierender.
+- Tested with **Python 3.14**, which uses `pygame-ce` (same API as `pygame`, but it
+  has wheels for new Python versions). The portal needs `cryptography`.
+- The code style rules (English code, no decorators, no `lambda`, descriptive names,
+  generous comments) are written down in [`CLAUDE.md`](CLAUDE.md).
