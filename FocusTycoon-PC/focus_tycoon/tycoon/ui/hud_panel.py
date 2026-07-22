@@ -25,7 +25,7 @@ HEIGHT = 84
 class HudPanel:
     def __init__(self, state, bus):
         self.state = state
-        self._status = "Cheer a producer to get started."
+        self._status = "Finish a task to power up your islands."
         self._status_lock = threading.Lock()
         # Listen for game events so the status line can react to them (see on_juice_event below).
         bus.subscribe(self.on_juice_event)

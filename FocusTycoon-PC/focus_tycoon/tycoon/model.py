@@ -120,9 +120,8 @@ class Inventory:
         A refinery asks for `desired_units`, but we only let it make as many as
         the scarcest input allows. If an input has run out the refinery simply
         makes less (or nothing) - there is no penalty, it just idles. Doing the
-        check and the removal together under the lock stops two threads (the
-        simulation making things, the player spending resources on an upgrade)
-        from ever driving a stack below zero.
+        check and the removal together under the lock keeps the amounts correct
+        even when several refineries draw from the same input at once.
         """
         with self._lock:
             units = desired_units
@@ -217,8 +216,7 @@ class GeneratorDefinition:
     """The fixed config of a producer type (ore vein, mana forge, ...)."""
 
     def __init__(self, generator_id, display_name, output_resource, recipe,
-                 base_output_per_second, fuel_burn_seconds, fuel_cost_gold,
-                 passive_output_ratio, max_level, base_upgrade_cost,
+                 base_output_per_second, max_level, base_upgrade_cost_gold,
                  upgrade_cost_growth, glyph, accent):
         self.id = generator_id
         self.display_name = display_name
@@ -226,11 +224,10 @@ class GeneratorDefinition:
         # If a recipe is set, this producer counts as a refinery (tier 1 / 2).
         self.recipe = recipe
         self.base_output_per_second = base_output_per_second
-        self.fuel_burn_seconds = fuel_burn_seconds
-        self.fuel_cost_gold = fuel_cost_gold
-        self.passive_output_ratio = passive_output_ratio
         self.max_level = max_level
-        self.base_upgrade_cost = base_upgrade_cost
+        # Upgrading a producer costs GOLD (the currency you earn from tasks), and
+        # each level makes the next one cost more (see the growth factor below).
+        self.base_upgrade_cost_gold = base_upgrade_cost_gold
         self.upgrade_cost_growth = upgrade_cost_growth
         self.glyph = glyph
         self.accent = accent
@@ -273,7 +270,6 @@ class GeneratorInstance:
         self.definition = definition
         self.position = position
         self._level = 1
-        self._fuel = 0.0  # 0.0 = empty tank (idle), 1.0 = just cheered
         self._unpulsed_output = 0.0
         self._lock = threading.RLock()
 
@@ -281,60 +277,27 @@ class GeneratorInstance:
         with self._lock:
             return self._level
 
-    def fuel_fraction(self):
-        with self._lock:
-            return self._fuel
-
-    def is_fueled(self):
-        with self._lock:
-            return self._fuel > 1e-6
-
-    def remaining_burn_seconds(self):
-        with self._lock:
-            return self._fuel * self.definition.fuel_burn_seconds
-
-    def _output_multiplier(self):
-        return self._level
-
     def current_output_per_second(self):
         with self._lock:
-            # Full efficiency while the tank still has fuel; otherwise fall
-            # back to the small passive trickle so the producer never fully
-            # stops.
-            if self._fuel > 1e-6:
-                efficiency = 1.0
-            else:
-                efficiency = self.definition.passive_output_ratio
-            return self.definition.base_output_per_second * self._output_multiplier() * efficiency
-
-    def ignite(self):
-        with self._lock:
-            self._fuel = 1.0
-
-    def drain_fuel(self, elapsed_seconds):
-        with self._lock:
-            if self._fuel <= 0:
-                return
-            # Fuel drains at a constant rate, so a full tank (1.0) reaches
-            # empty (0.0) after exactly fuel_burn_seconds of real time.
-            self._fuel = max(0.0, self._fuel - elapsed_seconds / self.definition.fuel_burn_seconds)
+            # Output scales straight with the level. The global Focus Surge
+            # multiplies this further, but that happens in the simulation so all
+            # producers share the same surge factor.
+            return self.definition.base_output_per_second * self._level
 
     def can_upgrade(self):
         with self._lock:
             return self._level < self.definition.max_level
 
     def upgrade_cost_at_current_level(self):
+        """The gold cost to raise this producer by one level, or 0 if maxed."""
         with self._lock:
             if self._level >= self.definition.max_level:
-                return {}
+                return 0
             # Each level makes the next upgrade cost more: the base cost is
             # multiplied by the growth factor raised to the number of levels
             # already gained, so the cost curve grows exponentially.
             factor = self.definition.upgrade_cost_growth ** (self._level - 1)
-            cost = {}
-            for resource, amount in self.definition.base_upgrade_cost.items():
-                cost[resource] = math.ceil(amount * factor)
-            return cost
+            return math.ceil(self.definition.base_upgrade_cost_gold * factor)
 
     def upgrade(self):
         with self._lock:
@@ -346,12 +309,6 @@ class GeneratorInstance:
             # Clamp to a valid range in case the save file is old and its
             # level no longer fits within the current max_level.
             self._level = max(1, min(self.definition.max_level, saved_level))
-
-    def restore_fuel(self, saved_fuel_fraction):
-        with self._lock:
-            # Clamp to a valid range in case the saved value is corrupted or
-            # out of date.
-            self._fuel = max(0.0, min(1.0, saved_fuel_fraction))
 
     def add_unpulsed_output(self, amount):
         with self._lock:

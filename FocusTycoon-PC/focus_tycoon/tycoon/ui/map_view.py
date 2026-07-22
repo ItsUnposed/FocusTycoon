@@ -1,8 +1,11 @@
 """The top-down map of floating islands (for pygame).
 
-- Click a producer's disc to CHEER it (spend gold; the fuel ring fills and drains).
-- Click the button under a producer to UPGRADE it (costs resources).
+- Click a producer (its disc or the button under it) to UPGRADE it (costs gold).
 - Click a locked island to unlock it (costs gold).
+
+Producers run on their own; finishing real tasks triggers a Focus Surge that
+speeds them all up for a while. While a surge is running the discs light up and
+their gears spin.
 
 All click areas come from the same helpers as the drawing, so what you see is what
 you click. The map is drawn into one fixed surface; the app scales it into its area
@@ -18,7 +21,7 @@ import threading
 import pygame
 
 from ...util import ui_fonts
-from ..juice import (GeneratorFueled, GeneratorUpgraded, MilestoneReached,
+from ..juice import (GeneratorUpgraded, MilestoneReached,
                      RecipeCompleted, ResourceProduced, SectorUnlocked)
 
 TILE_SIZE = 72
@@ -65,13 +68,6 @@ def brighter(color, amount):
     return mix(color, (255, 255, 255), amount)
 
 
-def format_cost(cost):
-    parts = []
-    for resource, amount in cost.items():
-        parts.append(f"{math.ceil(amount)}{resource.glyph}")
-    return "  ".join(parts)
-
-
 class FloatText:
     """A rising "+N" / text popup above a producer."""
 
@@ -87,9 +83,9 @@ class FloatText:
 
 
 class MapView:
-    def __init__(self, state, fueling_service, bus, particle_layer, screen_shaker):
+    def __init__(self, state, player_actions, bus, particle_layer, screen_shaker):
         self.state = state
-        self.fueling_service = fueling_service
+        self.player_actions = player_actions
         self.bus = bus
         self.particle_layer = particle_layer
         self.screen_shaker = screen_shaker
@@ -133,11 +129,7 @@ class MapView:
     # ---------- juice -> popups ----------
 
     def on_juice_event(self, event):
-        if isinstance(event, GeneratorFueled):
-            px, py = self._pixel_of(event.position)
-            self._add_float(px, py - DISC_RADIUS - 18, "Cheered!", GOLD, 15)
-            self._set_pulse(event.generator_id)
-        elif isinstance(event, ResourceProduced):
+        if isinstance(event, ResourceProduced):
             # Cap how many floating texts can be on screen at once, so a burst of
             # production events cannot flood the map with overlapping popups.
             with self._floats_lock:
@@ -226,17 +218,16 @@ class MapView:
             if not sector.is_unlocked():
                 continue
             for generator in sector.generators():
-                if self._upgrade_button(generator).collidepoint(px, py):
-                    self.fueling_service.upgrade(self.state, generator, self.bus)
-                    return
+                # Clicking the disc OR the button under it upgrades the producer.
                 center_x, center_y = self._disc_center(generator)
-                if math.hypot(px - center_x, py - center_y) <= DISC_RADIUS:
-                    self.fueling_service.ignite(self.state, generator, self.bus)
+                on_disc = math.hypot(px - center_x, py - center_y) <= DISC_RADIUS
+                if on_disc or self._upgrade_button(generator).collidepoint(px, py):
+                    self.player_actions.upgrade(self.state, generator, self.bus)
                     return
         # Locked islands last, so a producer wins a tie.
         for sector in self.state.sectors().values():
             if not sector.is_unlocked() and self._island_rect(sector.definition).collidepoint(px, py):
-                self.fueling_service.unlock_sector(self.state, sector, self.bus)
+                self.player_actions.unlock_sector(self.state, sector, self.bus)
                 return
 
     def get_tooltip(self, px, py):
@@ -246,10 +237,10 @@ class MapView:
             for generator in sector.generators():
                 center_x, center_y = self._disc_center(generator)
                 if math.hypot(px - center_x, py - center_y) <= DISC_RADIUS:
-                    cost = generator.definition.fuel_cost_gold
-                    if cost <= 0:
-                        return "Cheer for free"
-                    return f"Cheer: {math.ceil(cost)} gold"
+                    if not generator.can_upgrade():
+                        return "Max level"
+                    cost = generator.upgrade_cost_at_current_level()
+                    return f"Upgrade: {int(cost)} gold"
         return None
 
     # ---------- painting ----------
@@ -371,13 +362,14 @@ class MapView:
     def _paint_producer(self, surface, generator):
         center_x, center_y = self._disc_center(generator)
         accent = generator.definition.accent
-        fueled = generator.is_fueled()
-        fuel = generator.fuel_fraction()
+        # "working" now means a Focus Surge is running: the whole map lights up
+        # and its gears spin while the player is riding the reward of a task.
+        working = self.state.is_surging()
         level = generator.level()
         pop = self._pop_factor(generator.instance_id)
         # The disc grows a little with each level, but the growth is capped so it
-        # never gets huge. On top of that, "pop" briefly makes it swell right after
-        # a cheer or upgrade, then shrink back to normal size.
+        # never gets huge. On top of that, "pop" briefly makes it swell right
+        # after an upgrade, then shrink back to normal size.
         core_radius = DISC_RADIUS + min(level - 1, 5)
         disc_radius = round(core_radius * (1 + 0.22 * pop))
 
@@ -397,53 +389,38 @@ class MapView:
         self._draw_centered(surface, generator.definition.display_name, 11, INK,
                             center_x, center_y - DISC_RADIUS - 18, bold=True)
 
-        # OVERBOOST (purely cosmetic).
-        if self._is_overboost(generator):
-            self._draw_centered(surface, "OVERBOOST", 10, (255, 138, 61),
-                                center_x, center_y - DISC_RADIUS - 32, bold=True)
-
-        # Fuel ring track.
-        ring_radius = DISC_RADIUS + 6
-        self._circle_outline(surface, (255, 255, 255, 28), center_x, center_y, ring_radius, 5)
-        # Fuel ring fill (clockwise from the top).
-        if fuel > 0:
-            ring_color = brighter(accent, 0.25)
-            start = math.pi / 2 - 2 * math.pi * fuel
-            stop = math.pi / 2
-            rect = pygame.Rect(center_x - ring_radius, center_y - ring_radius, ring_radius * 2, ring_radius * 2)
-            pygame.draw.arc(surface, ring_color, rect, start, stop, 5)
-
         # Gear teeth (more per level).
-        self._paint_gear_teeth(surface, center_x, center_y, disc_radius, level, accent, fueled)
+        self._paint_gear_teeth(surface, center_x, center_y, disc_radius, level, accent, working)
 
-        # Core disc (radial gradient, scales briefly on a pop).
-        glow = brighter(accent, 0.35) if fueled else mix(accent, (40, 42, 54), 0.7)
-        edge = mix(accent, (20, 22, 30), 0.5) if fueled else (46, 48, 60)
+        # Core disc (radial gradient, scales briefly on a pop). Brighter while a
+        # surge is running.
+        glow = brighter(accent, 0.35) if working else mix(accent, (40, 42, 54), 0.7)
+        edge = mix(accent, (20, 22, 30), 0.5) if working else (46, 48, 60)
         self._radial_disc(surface, center_x, center_y - 6, disc_radius, glow, edge)
 
         # Inner ring from level 3.
         if level >= 3:
             inner_radius = disc_radius - 7
-            self._circle_outline(surface, (255, 255, 255, 70 if fueled else 40),
+            self._circle_outline(surface, (255, 255, 255, 70 if working else 40),
                                  center_x, center_y, inner_radius, 2)
 
         # Glyph.
-        glyph_color = (255, 255, 255) if fueled else (210, 214, 230)
+        glyph_color = (255, 255, 255) if working else (210, 214, 230)
         self._draw_centered(surface, generator.definition.glyph, 24, glyph_color, center_x, center_y + 2)
 
         # Orbiting "workers" (more per level).
-        self._paint_workers(surface, center_x, center_y, disc_radius, level, accent, fueled)
+        self._paint_workers(surface, center_x, center_y, disc_radius, level, accent, working)
 
         # Level pip.
         self._draw_centered(surface, f"Lv {level}", 9, (255, 255, 255), center_x, center_y + disc_radius - 8, bold=True)
 
         self._paint_upgrade_button(surface, generator)
 
-    def _paint_gear_teeth(self, surface, center_x, center_y, disc_radius, level, accent, fueled):
+    def _paint_gear_teeth(self, surface, center_x, center_y, disc_radius, level, accent, working):
         # Higher-level producers get more gear teeth, so leveling up is visible at a glance.
         teeth = 8 + (level - 1) * 2
-        # Only spin the gear while the producer is actually fueled (working).
-        spin = self.clock * 0.6 if fueled else 0
+        # Only spin the gear while a surge is running (the producer is working).
+        spin = self.clock * 0.6 if working else 0
         tooth_color = mix(accent, (18, 20, 28), 0.35)
         inner_radius = disc_radius - 1
         outer_radius = disc_radius + 4
@@ -456,12 +433,12 @@ class MapView:
             y1 = center_y + int(math.sin(angle) * outer_radius)
             pygame.draw.line(surface, tooth_color, (x0, y0), (x1, y1), 4)
 
-    def _paint_workers(self, surface, center_x, center_y, disc_radius, level, accent, fueled):
+    def _paint_workers(self, surface, center_x, center_y, disc_radius, level, accent, working):
         workers = min(level, 6)
         if workers <= 0:
             return
-        # Workers orbit faster while the producer is fueled (busy working) and slower otherwise.
-        spin = self.clock * 1.4 if fueled else self.clock * 0.2
+        # Workers orbit faster during a surge (busy working) and slower otherwise.
+        spin = self.clock * 1.4 if working else self.clock * 0.2
         orbit = disc_radius - 9
         dot_color = brighter(accent, 0.55)
         for i in range(workers):
@@ -475,7 +452,8 @@ class MapView:
         button = self._upgrade_button(generator)
         maxed = not generator.can_upgrade()
         cost = generator.upgrade_cost_at_current_level()
-        affordable = (not maxed) and self.state.inventory().has_all(cost)
+        # Upgrades are paid in gold now, so "affordable" checks the gold balance.
+        affordable = (not maxed) and self.state.gold().balance() >= cost
 
         if maxed:
             fill = (52, 54, 66)
@@ -493,14 +471,11 @@ class MapView:
             text = "MAX LEVEL"
             color = MUTED
         else:
-            text = f"Upgrade  {format_cost(cost)}"
+            text = f"Upgrade  {int(cost)} gold"
             color = (210, 245, 220) if affordable else (240, 205, 205)
         self._draw_centered(surface, text, 11, color, button.centerx, button.centery)
 
     # ---------- small helpers ----------
-
-    def _is_overboost(self, generator):
-        return (not generator.can_upgrade()) and generator.fuel_fraction() >= 0.95
 
     def _pop_factor(self, instance_id):
         """How strong the "pop" animation should be right now, from 1.0 (just triggered)

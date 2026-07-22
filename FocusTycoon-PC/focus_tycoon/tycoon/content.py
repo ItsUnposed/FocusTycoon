@@ -5,19 +5,19 @@ This is the "config file" of the neutral-fantasy world: resources, sectors
 need to touch to add content - the engine never changes.
 
 Balancing goal: with 1 to 2 finished tasks per day, fully maxing out the whole
-Tycoon should take about 50 to 100 days. That is why cheering is expensive, tanks
-burn slowly, and upgrade / unlock costs are high.
+Tycoon should take about 50 to 100 days. That is why producers run slowly on
+their own, and upgrade / unlock gold costs are high - real progress comes from
+finishing tasks (which grants gold and a Focus Surge).
 """
 
 from __future__ import annotations
+
+import math
 
 from .economy import GoldAccount
 from .model import (GeneratorDefinition, GeneratorInstance, MilestoneDefinition,
                     Position, RecipeDefinition, SectorDefinition, SectorInstance,
                     TycoonState, register_resource)
-from .simulation import BalancingConfig
-
-PASSIVE_OUTPUT_RATIO = BalancingConfig.PASSIVE_OUTPUT_RATIO_DEFAULT
 
 SECTOR_VERDANT = "verdant_isle"
 SECTOR_CRYSTAL = "crystal_reef"
@@ -25,13 +25,9 @@ SECTOR_MIST = "mist_archipelago"
 SECTOR_STAR = "star_citadel"
 
 # ---- balance multipliers, all in one place so tuning is easy ----
-# Cheering (filling the tank) costs 10x more gold than before.
-CHEER_COST_MULTIPLIER = 10
-# A full tank burns 5x longer than before.
-BURN_TIME_MULTIPLIER = 5
-# Upgrade resource costs are scaled up so upgrading takes a lot of production.
-UPGRADE_COST_MULTIPLIER = 7
-# Sector unlock costs are scaled up too.
+# A global knob on how much gold every producer upgrade costs.
+UPGRADE_GOLD_MULTIPLIER = 1.0
+# Sector unlock costs are scaled up so a new island is a real goal.
 UNLOCK_COST_MULTIPLIER = 10
 
 
@@ -85,36 +81,25 @@ def _make_recipe(recipe_id, name, inputs, output):
 
 
 # Helper so every raw-resource producer (one that turns nothing into a
-# resource, recipe=None) is built the same way, with the burn-time and
-# cheer-cost multipliers applied automatically. 6 is the max upgrade level
+# resource, recipe=None) is built the same way. `upgrade_cost_gold` is the gold
+# cost of the FIRST upgrade; it grows per level by `growth`. 6 is the max level
 # for these producers.
-def _make_base_producer(generator_id, name, output, per_second, burn, fuel_gold,
-                        upgrade_cost, growth):
+def _make_base_producer(generator_id, name, output, per_second, upgrade_cost_gold, growth):
     return GeneratorDefinition(
         generator_id, name, output, None, per_second,
-        burn * BURN_TIME_MULTIPLIER, fuel_gold * CHEER_COST_MULTIPLIER,
-        PASSIVE_OUTPUT_RATIO, 6, _scale_cost(upgrade_cost), growth,
+        6, math.ceil(upgrade_cost_gold * UPGRADE_GOLD_MULTIPLIER), growth,
         output.glyph, output.accent)
 
 
 # Same as _make_base_producer, but for refineries: the output resource comes
 # from the recipe instead of being passed in directly, and refineries cap out
 # at a lower max level (5) since they are worth more per level.
-def _make_refinery(generator_id, name, recipe, per_second, burn, fuel_gold,
-                   upgrade_cost, growth):
+def _make_refinery(generator_id, name, recipe, per_second, upgrade_cost_gold, growth):
     output = recipe.output
     return GeneratorDefinition(
         generator_id, name, output, recipe, per_second,
-        burn * BURN_TIME_MULTIPLIER, fuel_gold * CHEER_COST_MULTIPLIER,
-        PASSIVE_OUTPUT_RATIO, 5, _scale_cost(upgrade_cost), growth,
+        5, math.ceil(upgrade_cost_gold * UPGRADE_GOLD_MULTIPLIER), growth,
         output.glyph, output.accent)
-
-
-def _scale_cost(cost):
-    scaled = {}
-    for resource, amount in cost.items():
-        scaled[resource] = amount * UPGRADE_COST_MULTIPLIER
-    return scaled
 
 
 def _total_resources(state):
@@ -161,21 +146,19 @@ def register_all(registry):
     for recipe in (smelt_ore, brew_herb, grind_rune, blow_glass, condense_mana, distill_star):
         registry.register_recipe(recipe)
 
-    # ---- producers ----
-    registry.register_generator(_make_base_producer("erzader", "Ore Vein", raw_ore, 0.9, 22, 18, {herbs: 12}, 1.7))
-    registry.register_generator(_make_base_producer("kraeutergarten", "Herb Garden", herbs, 0.9, 22, 18, {raw_ore: 12}, 1.7))
-    registry.register_generator(_make_base_producer("kristallbohrer", "Crystal Drill", raw_crystal, 0.75, 24, 24, {herbs: 18}, 1.7))
-    registry.register_generator(_make_base_producer("nebelkondensator", "Mist Condenser", mist_dew, 0.7, 24, 26, {raw_crystal: 18}, 1.7))
+    # ---- producers (per_second output, first-upgrade gold cost, cost growth) ----
+    registry.register_generator(_make_base_producer("erzader", "Ore Vein", raw_ore, 0.9, 120, 1.7))
+    registry.register_generator(_make_base_producer("kraeutergarten", "Herb Garden", herbs, 0.9, 120, 1.7))
+    registry.register_generator(_make_base_producer("kristallbohrer", "Crystal Drill", raw_crystal, 0.75, 150, 1.7))
+    registry.register_generator(_make_base_producer("nebelkondensator", "Mist Condenser", mist_dew, 0.7, 160, 1.7))
 
-    registry.register_generator(_make_refinery("mana_schmelze", "Mana Forge", smelt_ore, 0.55, 20, 26, {raw_ore: 25}, 1.8))
-    registry.register_generator(_make_refinery("alchemie_zirkel", "Alchemy Circle", brew_herb, 0.55, 20, 26, {herbs: 25}, 1.8))
-    registry.register_generator(_make_refinery("runen_muehle", "Rune Mill", grind_rune, 0.5, 22, 30, {raw_crystal: 30}, 1.8))
-    registry.register_generator(_make_refinery("aether_veredler", "Aether Refiner", blow_glass, 0.5, 22, 30, {mist_dew: 30}, 1.8))
+    registry.register_generator(_make_refinery("mana_schmelze", "Mana Forge", smelt_ore, 0.55, 180, 1.8))
+    registry.register_generator(_make_refinery("alchemie_zirkel", "Alchemy Circle", brew_herb, 0.55, 180, 1.8))
+    registry.register_generator(_make_refinery("runen_muehle", "Rune Mill", grind_rune, 0.5, 200, 1.8))
+    registry.register_generator(_make_refinery("aether_veredler", "Aether Refiner", blow_glass, 0.5, 200, 1.8))
 
-    registry.register_generator(_make_refinery("mana_kondensator", "Mana Condenser", condense_mana, 0.4, 24, 40,
-                                               {crystal_bar: 18, rune_dust: 18}, 1.9))
-    registry.register_generator(_make_refinery("sternen_destille", "Star Still", distill_star, 0.4, 24, 40,
-                                               {elixir_essence: 18, aether_glass: 18}, 1.9))
+    registry.register_generator(_make_refinery("mana_kondensator", "Mana Condenser", condense_mana, 0.4, 320, 1.9))
+    registry.register_generator(_make_refinery("sternen_destille", "Star Still", distill_star, 0.4, 320, 1.9))
 
     # ---- milestones ----
     # Reached as soon as the player holds any small amount of resources at
@@ -210,7 +193,7 @@ def register_all(registry):
     def star_unlocked(state):
         return _is_unlocked(state, SECTOR_STAR)
 
-    registry.register_milestone(MilestoneDefinition("first_output", "First production cheered on", first_output))
+    registry.register_milestone(MilestoneDefinition("first_output", "First resources produced", first_output))
     registry.register_milestone(MilestoneDefinition("first_upgrade", "First producer upgraded", first_upgrade))
     registry.register_milestone(MilestoneDefinition("crystal_unlocked", "Crystal Reef unlocked", crystal_unlocked))
     registry.register_milestone(MilestoneDefinition("two_hundred", "200 resources gathered", two_hundred_resources))

@@ -102,7 +102,6 @@ class SaveManager:
             for generator in sector.generators():
                 generators[generator.definition.id] = {
                     "level": generator.level(),
-                    "fuel": round_to_three_decimals(generator.fuel_fraction()),
                 }
 
         root["tycoon"] = {
@@ -178,9 +177,10 @@ class SaveManager:
             if isinstance(raw.get("generators"), dict):
                 for key, value in raw["generators"].items():
                     if isinstance(value, dict):
+                        # Older saves also stored a "fuel" value; it no longer
+                        # exists in the new loop, so we just ignore it on load.
                         generators[str(key)] = GeneratorData(
-                            self._read_int(value.get("level"), 1),
-                            self._read_float(value.get("fuel"), 0.0))
+                            self._read_int(value.get("level"), 1))
             if isinstance(raw.get("milestones"), list):
                 milestones = [str(m) for m in raw["milestones"]]
         return TycoonData(inventory, sectors, generators, milestones)

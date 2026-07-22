@@ -32,9 +32,8 @@ class QuestData:
 
 
 class GeneratorData:
-    def __init__(self, level, fuel):
+    def __init__(self, level):
         self.level = level
-        self.fuel = fuel
 
 
 class TycoonData:
@@ -90,7 +89,6 @@ class SaveGame:
                 generator_data = self.tycoon.generators.get(generator.definition.id)
                 if generator_data is not None:
                     generator.restore_level(generator_data.level)
-                    generator.restore_fuel(generator_data.fuel)
 
         # Milestones (so the celebration effects do not fire again)
         for milestone_id in self.tycoon.milestones:

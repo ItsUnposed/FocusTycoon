@@ -25,10 +25,6 @@ class BalancingConfig:
 
     # A rough yardstick: how much gold a normal day of tasks is worth.
     REFERENCE_DAILY_GOLD = 500.0
-    # Seconds a full tank lasts by default (5x longer than before).
-    DEFAULT_FUEL_BURN_SECONDS = 110.0
-    # Output multiplier while a producer has no fuel - keeps a tiny trickle alive.
-    PASSIVE_OUTPUT_RATIO_DEFAULT = 0.02
     # Simulation ticks per second. Rendering runs on its own timer.
     TICK_RATE_HZ = 8
     # Minimum built-up output before a "resource produced" juice event fires.
@@ -49,7 +45,7 @@ class BalancingConfig:
 
 
 class ProductionSystem:
-    """Runs every tick: drains fuel and produces resources."""
+    """Runs every tick: produces resources at the current surge speed."""
 
     def tick(self, elapsed_seconds, state, bus: JuiceEventBus):
         # Let the Focus Surge run down a little each tick, then work out how much
@@ -60,7 +56,6 @@ class ProductionSystem:
             if not sector.is_unlocked():
                 continue
             for generator in sector.generators():
-                generator.drain_fuel(elapsed_seconds)
                 self._produce(generator, elapsed_seconds, surge_multiplier, state.inventory(), bus)
 
     def _produce(self, generator, elapsed_seconds, surge_multiplier, inventory, bus: JuiceEventBus):
@@ -95,25 +90,16 @@ class ProductionSystem:
                     definition.output_resource, pulsed))
 
 
-class FuelingService:
-    """The three player actions that spend something: cheer, upgrade, unlock."""
-
-    def ignite(self, state, generator, bus: JuiceEventBus):
-        """Cheer a producer: spend gold, fill the tank to full. Returns False if gold is short."""
-        cost = generator.definition.fuel_cost_gold
-        if not state.gold().try_spend(cost):
-            return False
-        generator.ignite()
-        bus.publish(juice.GeneratorFueled(generator.instance_id, generator.position, cost))
-        return True
+class PlayerActionService:
+    """The two player actions that spend gold: upgrade a producer, unlock a sector."""
 
     def upgrade(self, state, generator, bus: JuiceEventBus):
-        """Raise a producer's level. This is the ONLY action that spends resources."""
+        """Raise a producer's level by one, paying its gold cost. Returns False
+        if the producer is maxed out or there is not enough gold."""
         if not generator.can_upgrade():
             return False
         cost = generator.upgrade_cost_at_current_level()
-        # Check and pay in one step, so the simulation thread cannot make us go negative.
-        if not state.inventory().try_remove_all(cost):
+        if not state.gold().try_spend(cost):
             return False
         generator.upgrade()
         bus.publish(juice.GeneratorUpgraded(

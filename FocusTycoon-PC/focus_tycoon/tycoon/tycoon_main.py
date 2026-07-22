@@ -10,7 +10,7 @@ from __future__ import annotations
 from .content import GameContentRegistry, register_all, build_initial_state
 from .core import GameLoop
 from .juice import JuiceDirector, JuiceEventBus
-from .simulation import BalancingConfig, FuelingService, MilestoneSystem, ProductionSystem
+from .simulation import BalancingConfig, MilestoneSystem, PlayerActionService, ProductionSystem
 from .ui.hud_panel import HEIGHT as HUD_HEIGHT, HudPanel
 from .ui.map_view import MAP_HEIGHT, MAP_WIDTH, TILE_SIZE, MapView
 from .ui.particle_layer import ParticleLayer
@@ -31,7 +31,7 @@ class TycoonPanel:
             saved.apply_tycoon(self.state)
 
         self._bus = JuiceEventBus()
-        self._fueling_service = FuelingService()
+        self._player_actions = PlayerActionService()
         production_system = ProductionSystem()
         milestone_system = MilestoneSystem(registry.all_milestones())
 
@@ -50,7 +50,7 @@ class TycoonPanel:
         self._game_loop = GameLoop(BalancingConfig.TICK_RATE_HZ, tick)
 
         self._hud_panel = HudPanel(self.state, self._bus)
-        self._map_view = MapView(self.state, self._fueling_service, self._bus,
+        self._map_view = MapView(self.state, self._player_actions, self._bus,
                                  self._particle_layer, self._screen_shaker)
 
         # Transform of the scaled map (so we can map clicks back to map coordinates).
