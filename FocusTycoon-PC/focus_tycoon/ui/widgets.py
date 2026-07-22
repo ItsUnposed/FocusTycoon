@@ -213,6 +213,107 @@ class Button:
                                  self.rect.centerx, self.rect.centery, bold=True)
 
 
+class PopupScroll:
+    """Vertical scrolling for a popup's content area (tutorial and modals).
+
+    The popup draws its content into a fixed "viewport" rectangle every frame and
+    tells this helper how tall the whole content is. If the content is taller than
+    the viewport, this remembers how far it is scrolled and draws a thin scrollbar
+    on the right edge of the viewport. The mouse wheel and dragging the thumb both
+    move the same offset.
+
+    The popup is responsible for clipping its drawing to the viewport and for
+    shifting each element up by `offset` pixels (see content_top()).
+    """
+
+    # How many pixels one wheel "click" scrolls.
+    WHEEL_STEP = 40
+
+    def __init__(self):
+        self.offset = 0             # how far we have scrolled down, in pixels
+        self.max_offset = 0         # the largest allowed offset (0 = fits, no scroll)
+        self.viewport = pygame.Rect(0, 0, 0, 0)
+        self.content_height = 0
+        self._thumb = pygame.Rect(0, 0, 0, 0)
+        self._dragging = False
+        self._drag_grab = 0         # where inside the thumb we grabbed it
+
+    def reset(self):
+        """Jump back to the top. Call this when the popup (re)opens."""
+        self.offset = 0
+        self._dragging = False
+
+    def set_metrics(self, viewport, content_height):
+        """Tell the scroll how big the visible area and the full content are.
+
+        Called once per frame from the popup's draw method, before drawing the
+        content, so the offset always stays in a valid range.
+        """
+        self.viewport = viewport
+        self.content_height = content_height
+        self.max_offset = max(0, content_height - viewport.height)
+        # Keep the current offset inside the allowed range (the content may have
+        # shrunk since last frame, e.g. the language changed to shorter text).
+        if self.offset > self.max_offset:
+            self.offset = self.max_offset
+        if self.offset < 0:
+            self.offset = 0
+
+    def content_top(self):
+        """The screen y where content position 0 lands, shifted up by the offset."""
+        return self.viewport.y - self.offset
+
+    def scroll_by(self, amount):
+        self.offset = max(0, min(self.max_offset, self.offset + amount))
+
+    def handle_event(self, event):
+        """Handle wheel / thumb-drag. Returns True if the event was used up."""
+        if event.type == pygame.MOUSEWHEEL and self.max_offset > 0:
+            # A positive event.y means the wheel rolled up, which scrolls up.
+            self.scroll_by(-event.y * self.WHEEL_STEP)
+            return True
+        if (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
+                and self.max_offset > 0 and self._thumb.collidepoint(event.pos)):
+            self._dragging = True
+            self._drag_grab = event.pos[1] - self._thumb.y
+            return True
+        if event.type == pygame.MOUSEMOTION and self._dragging:
+            self._drag_to(event.pos[1])
+            return True
+        if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self._dragging:
+            self._dragging = False
+            return True
+        return False
+
+    def _drag_to(self, mouse_y):
+        # Convert the thumb's position along its track into a scroll offset, the
+        # same idea as the tasks-list scrollbar.
+        usable = self.viewport.height - self._thumb.height
+        if usable <= 0 or self.max_offset <= 0:
+            return
+        relative = (mouse_y - self._drag_grab) - self.viewport.y
+        fraction = max(0.0, min(1.0, relative / usable))
+        self.offset = int(fraction * self.max_offset)
+
+    def draw_scrollbar(self, surface):
+        """Draw the thin scrollbar on the right edge of the viewport (if needed)."""
+        if self.max_offset <= 0:
+            # Everything fits, so there is nothing to scroll - make the thumb an
+            # empty rect so no click can accidentally collide with it.
+            self._thumb = pygame.Rect(0, 0, 0, 0)
+            return
+        track = pygame.Rect(self.viewport.right - 10, self.viewport.y, 6, self.viewport.height)
+        theme.rounded_rect(surface, track, theme.BG_ALT, 3)
+        # The thumb's height mirrors how much of the content is visible at once.
+        visible_fraction = self.viewport.height / self.content_height
+        thumb_height = max(28, int(track.height * visible_fraction))
+        scroll_fraction = self.offset / self.max_offset
+        thumb_y = track.y + int((track.height - thumb_height) * scroll_fraction)
+        self._thumb = pygame.Rect(track.x, thumb_y, track.width, thumb_height)
+        color = theme.ACCENT if self._dragging else theme.CARD_HI
+        theme.rounded_rect(surface, self._thumb, color, 3)
+
+
 class Dropdown:
     """A small dropdown. options is a list of (value, label). Draw it last so its
     open list appears on top of everything else."""

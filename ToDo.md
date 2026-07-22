@@ -16,13 +16,6 @@ the existing Logineo NRW / IServ portal (`portal/`). This should be a separate p
 type, not merged into the existing one, since Untis serves a different purpose
 (timetable and substitutions, not homework) and most likely needs its own login flow.
 
-## Popups: add a scrollbar, keep everything else
-
-The tutorial overlay and the small modal windows (`modal_kind` in `game_window.py`,
-for example "Connect portal" and "Import from calendar") should stay visually and
-functionally the same as they are today - just add a scrollbar to each one, so long
-content is not cut off. Do not redesign these windows beyond that.
-
 ## Scrollbars: keep mouse control, add keyboard control
 
 Every place that has a scrollbar today (for example the tasks list) should keep

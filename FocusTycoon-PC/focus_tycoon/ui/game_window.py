@@ -19,7 +19,7 @@ import pygame
 
 from . import theme
 from .game_state_gold_account import GameStateGoldAccount
-from .widgets import Button, Dropdown, SegmentedControl, TextInput
+from .widgets import Button, Dropdown, PopupScroll, SegmentedControl, TextInput
 from .. import i18n
 from ..model.game_state import GameState
 from ..persist.save_manager import SaveManager
@@ -136,11 +136,15 @@ class GameWindow:
         self.modal_segmented = None
         self.modal_segmented_label = ""
         self.modal_submit = None
+        # Lets the modal's field area scroll when it is too tall for the window.
+        self.modal_scroll = PopupScroll()
 
         # Tutorial overlay.
         self.tutorial_active = False
         self.tutorial_page = 0
         self.tutorial_buttons = []
+        # Lets the tutorial's text scroll when a page has more lines than fit.
+        self.tutorial_scroll = PopupScroll()
 
         # Scrollbar of the tasks page.
         self.scroll_max = 0
@@ -209,15 +213,24 @@ class GameWindow:
                 self._toggle_fullscreen()
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 self._handle_escape()
-            elif self.tutorial_active or self.confirm_active:
-                pass  # overlays swallow the rest of the input
+            elif self.tutorial_active:
+                # Let the tutorial's text scroll (wheel / dragging the thumb);
+                # any other input is simply swallowed by the overlay.
+                self.tutorial_scroll.handle_event(event)
+            elif self.confirm_active:
+                pass  # the confirm overlay swallows the rest of the input
             elif self.modal_kind is not None:
-                # A modal is open: send typing/paste/etc. to its own fields
-                # instead of the fields on the page underneath it.
-                for text_field in self.modal_inputs:
-                    text_field.handle_event(event)
-                if self.modal_segmented is not None:
-                    self.modal_segmented.handle_event(event)
+                # First offer the event to the modal's own scrollbar (wheel or
+                # dragging the thumb). If it was not used for scrolling, send
+                # typing/clicks to the modal's fields instead of the page below.
+                if not self.modal_scroll.handle_event(event):
+                    # A click outside the scrolling area must not reach a field
+                    # that is currently scrolled out of sight, so guard those.
+                    if not self._modal_click_outside_scroll(event):
+                        for text_field in self.modal_inputs:
+                            text_field.handle_event(event)
+                        if self.modal_segmented is not None:
+                            self.modal_segmented.handle_event(event)
             elif event.type == pygame.MOUSEWHEEL and self.page == PAGE_TASKS:
                 # Clamp so the wheel can't scroll past the top or bottom of the list.
                 self.scroll_y = max(0, min(self.scroll_max, self.scroll_y - event.y * 40))
@@ -287,6 +300,17 @@ class GameWindow:
         for button in buttons:
             if button.handle_event(event):
                 return
+
+    def _modal_click_outside_scroll(self, event):
+        # True only for a mouse click that lands outside the modal's scrolling
+        # area while it is actually scrolling. Used to stop such a click from
+        # focusing a field that has been scrolled out of view. Typing and other
+        # events are never blocked (they return False here).
+        if self.modal_scroll.max_offset <= 0:
+            return False
+        if event.type != pygame.MOUSEBUTTONDOWN:
+            return False
+        return not self.modal_scroll.viewport.collidepoint(event.pos)
 
     # ---------- window / fullscreen / scrolling ----------
 
@@ -889,6 +913,7 @@ class GameWindow:
     def _open_tutorial(self):
         self.tutorial_active = True
         self.tutorial_page = 0
+        self.tutorial_scroll.reset()
 
     def _draw_tutorial(self):
         surface = self.screen
@@ -910,11 +935,24 @@ class GameWindow:
         theme.draw_text(surface, page["title"], 22, theme.TEXT, box.x + 32, box.y + 26, bold=True)
         theme.draw_text(surface, f"{self.tutorial_page + 1} / {len(pages)}", 12, theme.MUTED,
                         box.right - 70, box.y + 32)
-        # cursor_y walks down the box, one text line at a time.
-        cursor_y = box.y + 72
+
+        # The text lines live in a scrollable area between the title and the
+        # buttons, so a page with a lot of text is no longer cut off. Everything
+        # else (title, page number, buttons) stays exactly where it was.
+        line_height = 26
+        viewport = pygame.Rect(box.x + 32, box.y + 72, box.width - 64, box.height - 142)
+        content_height = len(page["lines"]) * line_height
+        self.tutorial_scroll.set_metrics(viewport, content_height)
+
+        # Clip drawing to the viewport so scrolled-away lines do not spill over
+        # the title or the buttons, then draw each line shifted by the scroll.
+        surface.set_clip(viewport)
+        line_y = self.tutorial_scroll.content_top()
         for line in page["lines"]:
-            theme.draw_text(surface, line, 14, theme.MUTED, box.x + 32, cursor_y)
-            cursor_y += 26
+            theme.draw_text(surface, line, 14, theme.MUTED, box.x + 32, line_y)
+            line_y += line_height
+        surface.set_clip(None)
+        self.tutorial_scroll.draw_scrollbar(surface)
 
         self.tutorial_buttons = []
         mouse_pos = pygame.mouse.get_pos()
@@ -938,9 +976,12 @@ class GameWindow:
     def _tutorial_prev(self):
         if self.tutorial_page > 0:
             self.tutorial_page -= 1
+            # A different page has different text, so start it at the top again.
+            self.tutorial_scroll.reset()
 
     def _tutorial_next(self):
         self.tutorial_page += 1
+        self.tutorial_scroll.reset()
 
     def _close_tutorial(self):
         self.tutorial_active = False
@@ -950,6 +991,7 @@ class GameWindow:
     def _open_calendar_modal(self):
         source_field = TextInput(pygame.Rect(0, 0, 10, 44), translate("calendar_source_placeholder"))
         source_field.focused = True
+        self.modal_scroll.reset()
         self.modal_kind = "calendar"
         self.modal_title = translate("import_calendar_title")
         self.modal_hint = ""
@@ -978,6 +1020,7 @@ class GameWindow:
             logineo_field.text = self.portal_config.school_url(PortalType.LOGINEO_NRW) or ""
             iserv_field.text = self.portal_config.school_url(PortalType.ISERV) or ""
 
+        self.modal_scroll.reset()
         self.modal_kind = "portal"
         self.modal_title = translate("connect_portal_title")
         self.modal_hint = translate("portal_hint")
@@ -1015,18 +1058,22 @@ class GameWindow:
         surface.blit(veil, (0, 0))
 
         # This one dialog box is reused for both the calendar and portal
-        # modals, which need different amounts of space - so its height is
-        # calculated from how many fields, and which optional parts, it has.
+        # modals, which need different amounts of space - so its natural height
+        # is calculated from how many fields, and which optional parts, it has.
         field_count = len(self.modal_inputs)
         extra = 78 if self.modal_segmented is not None else 0
         hint_extra = 24 if self.modal_hint else 0
-        box = pygame.Rect(0, 0, 640, 130 + field_count * 78 + extra + hint_extra + 60)
+        natural_height = 130 + field_count * 78 + extra + hint_extra + 60
+        # Never let the box grow taller than the window. If the content does not
+        # fit, the box is capped here and its field area scrolls instead (below).
+        max_height = self.height - 40
+        box = pygame.Rect(0, 0, 640, min(natural_height, max_height))
         box.center = (self.width // 2, self.height // 2)
         theme.rounded_rect(surface, box, theme.PANEL, 18, theme.STROKE, 1)
 
         inner_x = box.x + 28
         inner_width = box.width - 56
-        # cursor_y walks down the box as we draw each part, same as elsewhere.
+        # The title and hint stay fixed at the top of the box.
         cursor_y = box.y + 24
         theme.draw_text(surface, self.modal_title, 20, theme.TEXT, inner_x, cursor_y, bold=True)
         cursor_y += 34
@@ -1034,18 +1081,37 @@ class GameWindow:
             theme.draw_text(surface, self.modal_hint, 12, theme.MUTED, inner_x, cursor_y)
             cursor_y += 24
 
+        # The segmented control and the fields live in a scrollable area between
+        # the header above and the buttons below. When everything fits (the
+        # normal case) the box keeps its natural height and nothing scrolls, so
+        # the modal looks exactly as before; only a too-small window scrolls.
+        buttons_top = box.bottom - 56
+        viewport = pygame.Rect(inner_x, cursor_y, inner_width, (buttons_top - 12) - cursor_y)
+        content_height = extra + field_count * 78
+        self.modal_scroll.set_metrics(viewport, content_height)
+        # When the scrollbar is showing, leave room for it so it does not sit on
+        # top of the fields. When it is not showing, keep the full width as before.
+        if self.modal_scroll.max_offset > 0:
+            field_width = inner_width - 16
+        else:
+            field_width = inner_width
+
+        surface.set_clip(viewport)
+        content_y = self.modal_scroll.content_top()
         if self.modal_segmented is not None:
-            theme.draw_text(surface, self.modal_segmented_label, 13, theme.TEXT, inner_x, cursor_y, bold=True)
-            cursor_y += 26
-            self.modal_segmented.draw(surface, inner_x, cursor_y)
-            cursor_y += 52
+            theme.draw_text(surface, self.modal_segmented_label, 13, theme.TEXT, inner_x, content_y, bold=True)
+            content_y += 26
+            self.modal_segmented.draw(surface, inner_x, content_y)
+            content_y += 52
 
         for label, text_field in zip(self.modal_labels, self.modal_inputs):
-            theme.draw_text(surface, label, 13, theme.TEXT, inner_x, cursor_y, bold=True)
-            cursor_y += 24
-            text_field.set_rect(pygame.Rect(inner_x, cursor_y, inner_width, 44))
+            theme.draw_text(surface, label, 13, theme.TEXT, inner_x, content_y, bold=True)
+            content_y += 24
+            text_field.set_rect(pygame.Rect(inner_x, content_y, field_width, 44))
             text_field.draw(surface)
-            cursor_y += 54
+            content_y += 54
+        surface.set_clip(None)
+        self.modal_scroll.draw_scrollbar(surface)
 
         confirm_text = translate("confirm")
         cancel_text = translate("cancel")
