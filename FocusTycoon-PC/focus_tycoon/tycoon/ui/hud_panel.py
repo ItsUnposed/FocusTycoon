@@ -1,7 +1,8 @@
 """The slim status bar at the top of the Tycoon page.
 
 It shows the gold balance (the scarce currency, so it stands out), a live row of
-resource chips (glyph + amount per resource) and a status line for milestones and
+resource chips (glyph + amount per resource), a Focus Surge meter (how long the
+current task-driven speed-up still lasts) and a status line for milestones and
 unlocks.
 """
 
@@ -14,12 +15,17 @@ import pygame
 
 from ...util import ui_fonts
 from ..juice import GeneratorUpgraded, MilestoneReached, SectorUnlocked
+from ..simulation import BalancingConfig
 
 GOLD = (245, 205, 96)
 INK = (236, 238, 248)
 MUTED = (168, 172, 194)
+# The Focus Surge meter uses a warm orange when it is running.
+SURGE_ON = (255, 168, 84)
 
 HEIGHT = 84
+# Space reserved on the right of the panel for the Focus Surge meter.
+SURGE_METER_WIDTH = 190
 
 
 class HudPanel:
@@ -72,10 +78,14 @@ class HudPanel:
         panel.blit(gold_text, (coin_x + 36, coin_y - 2))
         panel.blit(ui_fonts.base(11).render("GOLD", True, MUTED), (coin_x + 36, coin_y + 24))
 
+        # The surge meter sits on the right, so the resource chips must stop
+        # before it to avoid drawing on top of each other.
+        self._draw_surge_meter(panel, width, height)
+
         # Resource chips.
         chip_x = coin_x + 150
         chip_y = 16
-        max_x = width - 40
+        max_x = width - SURGE_METER_WIDTH - 40
         for resource, amount in self.state.inventory().snapshot().items():
             # Skip resources the player barely has; a chip showing "0" is not useful.
             if amount < 0.5:
@@ -100,3 +110,34 @@ class HudPanel:
             status = self._status
         status_font = ui_fonts.base(12, italic=True)
         panel.blit(status_font.render(status, True, (255, 216, 140)), (coin_x, height - 22))
+
+    def _draw_surge_meter(self, panel, width, height):
+        """Draw the Focus Surge meter: a bar that shows how long the current
+        task-driven speed-up still has to run."""
+        remaining = self.state.surge_seconds_remaining()
+        # The bar fills up relative to the maximum surge the timer can hold.
+        fraction = min(1.0, remaining / BalancingConfig.SURGE_MAX_SECONDS)
+
+        meter_x = width - SURGE_METER_WIDTH - 20
+        label = ui_fonts.base(11, bold=True).render("FOCUS SURGE", True, MUTED)
+        panel.blit(label, (meter_x, 14))
+
+        # Bar track.
+        track = pygame.Rect(meter_x, 32, SURGE_METER_WIDTH, 12)
+        pygame.draw.rect(panel, (44, 46, 62), track, border_radius=6)
+        # Bar fill (only when there is some surge left).
+        if fraction > 0:
+            fill_width = max(6, int(SURGE_METER_WIDTH * fraction))
+            fill = pygame.Rect(meter_x, 32, fill_width, 12)
+            pygame.draw.rect(panel, SURGE_ON, fill, border_radius=6)
+
+        # A short label under the bar: the time left, or a hint when idle.
+        if remaining > 0:
+            minutes = int(remaining) // 60
+            seconds = int(remaining) % 60
+            text = f"{minutes}:{seconds:02d} left"
+            color = SURGE_ON
+        else:
+            text = "Idle - finish a task"
+            color = MUTED
+        panel.blit(ui_fonts.base(11).render(text, True, color), (meter_x, 50))
