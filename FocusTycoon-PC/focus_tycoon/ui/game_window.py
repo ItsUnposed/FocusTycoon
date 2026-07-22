@@ -213,6 +213,11 @@ class GameWindow:
                 self._toggle_fullscreen()
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 self._handle_escape()
+            elif event.type == pygame.KEYDOWN and self._is_scroll_key(event.key):
+                # Page Up/Down and the arrow keys scroll whichever scrollbar is
+                # currently on top (tutorial, modal, or the tasks list). The
+                # mouse wheel and thumb still work exactly as before.
+                self._scroll_with_key(event.key)
             elif self.tutorial_active:
                 # Let the tutorial's text scroll (wheel / dragging the thumb);
                 # any other input is simply swallowed by the overlay.
@@ -300,6 +305,39 @@ class GameWindow:
         for button in buttons:
             if button.handle_event(event):
                 return
+
+    def _is_scroll_key(self, key):
+        return key in (pygame.K_UP, pygame.K_DOWN, pygame.K_PAGEUP, pygame.K_PAGEDOWN)
+
+    def _scroll_with_key(self, key):
+        # Route the key to whichever scrollable is currently shown on top. The
+        # confirm overlay has nothing to scroll, so it is simply ignored.
+        if self.tutorial_active:
+            self.tutorial_scroll.handle_key(key)
+        elif self.modal_kind is not None:
+            self.modal_scroll.handle_key(key)
+        elif self.confirm_active:
+            pass
+        elif self.page == PAGE_TASKS:
+            self._scroll_tasks_with_key(key)
+
+    def _scroll_tasks_with_key(self, key):
+        # The tasks list keeps its own scroll position (scroll_y / scroll_max)
+        # instead of a PopupScroll, so it gets its own small keyboard handler
+        # that mirrors the popup one (arrows = small step, Page keys = a page).
+        if self.scroll_max <= 0:
+            return
+        small_step = 40
+        page_step = max(1, self._content_rect().height - 40)
+        if key == pygame.K_UP:
+            delta = -small_step
+        elif key == pygame.K_DOWN:
+            delta = small_step
+        elif key == pygame.K_PAGEUP:
+            delta = -page_step
+        else:
+            delta = page_step
+        self.scroll_y = max(0, min(self.scroll_max, self.scroll_y + delta))
 
     def _modal_click_outside_scroll(self, event):
         # True only for a mouse click that lands outside the modal's scrolling

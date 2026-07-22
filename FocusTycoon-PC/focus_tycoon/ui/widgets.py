@@ -226,7 +226,7 @@ class PopupScroll:
     shifting each element up by `offset` pixels (see content_top()).
     """
 
-    # How many pixels one wheel "click" scrolls.
+    # How many pixels one wheel "click" or one arrow-key press scrolls.
     WHEEL_STEP = 40
 
     def __init__(self):
@@ -284,6 +284,29 @@ class PopupScroll:
             self._dragging = False
             return True
         return False
+
+    def handle_key(self, key):
+        """Scroll with the keyboard. Returns True if the key was used.
+
+        Arrow Up / Down move a small step; Page Up / Down move nearly a whole
+        page. The mouse (wheel and dragging the thumb) keeps working as before.
+        """
+        if self.max_offset <= 0:
+            return False
+        # A "page" is almost the whole viewport, leaving a little overlap so the
+        # reader keeps their place between pages.
+        page_step = max(1, self.viewport.height - 40)
+        if key == pygame.K_UP:
+            self.scroll_by(-self.WHEEL_STEP)
+        elif key == pygame.K_DOWN:
+            self.scroll_by(self.WHEEL_STEP)
+        elif key == pygame.K_PAGEUP:
+            self.scroll_by(-page_step)
+        elif key == pygame.K_PAGEDOWN:
+            self.scroll_by(page_step)
+        else:
+            return False
+        return True
 
     def _drag_to(self, mouse_y):
         # Convert the thumb's position along its track into a scroll offset, the
