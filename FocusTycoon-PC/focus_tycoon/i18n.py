@@ -60,6 +60,8 @@ TRANSLATIONS = {
         "split_button": "Split up",
         "due": "due {date}",
         "meta_line": "Split: {level}   ·   {minutes} min   ·   +{gold} gold",
+        # Same line, but for steps that have no estimated time at all.
+        "meta_line_no_time": "Split: {level}   ·   +{gold} gold",
         # dialogs
         "cancel": "Cancel",
         "confirm": "Confirm",
@@ -119,6 +121,8 @@ TRANSLATIONS = {
         "split_button": "Aufteilen",
         "due": "faellig {date}",
         "meta_line": "Zerteilung: {level}   ·   {minutes} Min   ·   +{gold} Gold",
+        # Same line, but for steps that have no estimated time at all.
+        "meta_line_no_time": "Zerteilung: {level}   ·   +{gold} Gold",
         "cancel": "Abbrechen",
         "confirm": "Bestaetigen",
         "connect": "Verbinden",

@@ -156,7 +156,7 @@ class SaveManager:
                         stages.append(TaskData(
                             str(stage.get("title", "Step")),
                             self._read_int(stage.get("energyLevel"), energy_level),
-                            self._read_int(stage.get("minutes"), 10),
+                            self._read_optional_minutes(stage),
                             stage.get("completed") is True,
                             detail))
             if stages:
@@ -184,6 +184,20 @@ class SaveManager:
             if isinstance(raw.get("milestones"), list):
                 milestones = [str(m) for m in raw["milestones"]]
         return TycoonData(inventory, sectors, generators, milestones)
+
+    def _read_optional_minutes(self, stage):
+        # A step's estimated time is optional: it may be a number, or it may be
+        # explicitly "no estimated time" (saved as null / None).
+        #   - key missing entirely: a very old save that always had a time, so
+        #     fall back to the old default of 10 minutes.
+        #   - value is null: the step deliberately has no estimated time -> None.
+        #   - value is a number: use that number.
+        if "minutes" not in stage:
+            return 10
+        value = stage.get("minutes")
+        if value is None:
+            return None
+        return self._read_int(value, 10)
 
     def _read_int(self, value, fallback):
         # In Python, True and False also count as int/float values (1 and 0),

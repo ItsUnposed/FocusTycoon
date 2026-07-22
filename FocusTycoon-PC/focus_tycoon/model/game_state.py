@@ -158,7 +158,14 @@ class GameState:
             return None
 
         def sort_key(task):
-            return (task.estimated_minutes, task.id)
+            # We recommend the smallest step. A step with no estimated time has
+            # an unknown length, so we treat it as very large here - it will only
+            # be recommended if there is no step with a real (smaller) time.
+            if task.estimated_minutes is None:
+                minutes = 1000000000
+            else:
+                minutes = task.estimated_minutes
+            return (minutes, task.id)
 
         return min(open_steps, key=sort_key)
 

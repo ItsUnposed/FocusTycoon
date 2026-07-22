@@ -75,15 +75,25 @@ def _run_one_demo(task_text, level, label):
 
     total = 0
     for task in quest.get_stages():
-        print(f"  - {task.title:<32} {task.estimated_minutes:>2} min  "
+        # A step may have no estimated time (None). Show a dash instead of a
+        # number so the formatting still lines up.
+        if task.estimated_minutes is None:
+            minutes_text = " -"
+        else:
+            minutes_text = f"{task.estimated_minutes:>2}"
+        print(f"  - {task.title:<32} {minutes_text} min  "
               f"x{focus_multiplier(task.energy_level):.1f}  =  {task.gold_reward:>4} gold")
         total += task.gold_reward
     print(f"\n  => Quest with {quest.get_stage_count()} stages, {total} gold in total.")
 
     recommendation = game.recommend_next_task()
     if recommendation is not None:
+        if recommendation.estimated_minutes is None:
+            minutes_text = "no time estimate"
+        else:
+            minutes_text = f"{recommendation.estimated_minutes} min"
         print(f'  Recommendation first: "{recommendation.title}" '
-              f"({recommendation.estimated_minutes} min)\n")
+              f"({minutes_text})\n")
 
 
 if __name__ == "__main__":

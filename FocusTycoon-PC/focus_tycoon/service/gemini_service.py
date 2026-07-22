@@ -117,10 +117,15 @@ class GeminiService:
 
         # "Do not split" or a detected fixed appointment: keep it as one task.
         if split_level == SPLIT_NONE or treat_as_single:
-            # Fall back to a default duration if none was estimated, and
-            # always use a medium reward since there are no steps to base a
-            # reward level on.
-            minutes = estimated_total_minutes if estimated_total_minutes > 0 else 30
+            # Only give the task an estimated time if the user actually entered
+            # one. If they left it empty (or 0), we do not invent a time - the
+            # task simply has no estimated time (Task handles the reward).
+            if estimated_total_minutes > 0:
+                minutes = estimated_total_minutes
+            else:
+                minutes = None
+            # Always use a medium reward level since there are no steps to base
+            # a reward level on.
             reward_level = SPLIT_MEDIUM
             return [Task(raw_task_input, reward_level, minutes)]
 
@@ -131,7 +136,7 @@ class GeminiService:
         prompt = self._build_breakdown_prompt(
             raw_task_input, description, split_level, estimated_total_minutes)
         answer_text = self._call_gemini_with_retry(prompt)
-        return self._parse_steps(answer_text, split_level)
+        return self._parse_steps(answer_text, split_level, estimated_total_minutes)
 
     def estimate_minutes(self, raw_task_input, description):
         """Ask the AI for a rough total duration (in minutes) for the whole task."""
@@ -183,8 +188,8 @@ class GeminiService:
         """Build the full text prompt we send to the Gemini API.
 
         This is plain text instructions for the AI, built up piece by piece:
-        how much to split the task, the task itself, any extra context /
-        time estimate the user gave, and the exact JSON format we expect back.
+        how much to split the task, the task itself, any extra context, whether
+        to add per-step time estimates, and the exact JSON format we expect back.
         """
         level_instruction = self._level_instruction(split_level)
 
@@ -197,13 +202,41 @@ class GeminiService:
                 "concrete and correct, but do not invent things that are not there):\n"
                 f'"{description.strip()}"\n')
 
-        # Same idea: only add the time estimate section if the user gave one.
-        estimate_block = ""
+        # The time rules and the exact JSON format depend on whether the user
+        # gave a total time. We build both parts here so the two modes stay
+        # clearly separated and easy to read.
         if estimated_total_minutes > 0:
-            estimate_block = (
-                f"\nThe user thinks the whole task takes about {estimated_total_minutes} minutes.\n"
-                'Spread the "estimated_minutes" of the steps so their sum is roughly this total\n'
-                "(while staying inside the minute range given above for each step).\n")
+            # The user entered a total, so every step gets an "estimated_minutes"
+            # value and the parts must add up to exactly that total.
+            time_block = (
+                f"\nThe user says the WHOLE task takes about {estimated_total_minutes} minutes\n"
+                'in total. Give every step an "estimated_minutes" value. Split this total\n'
+                "across the steps by how much work each step really is: a bigger step gets\n"
+                "more minutes, a small step gets fewer. Do NOT just divide the time evenly.\n"
+                'The individual "estimated_minutes" values MUST add up to exactly\n'
+                f"{estimated_total_minutes}.\n")
+            format_block = (
+                "FORMAT of each step:\n"
+                '- "title": a SHORT heading of 1 to 5 words. No sentences, no details here.\n'
+                '- "detail": one short sentence with the concrete instruction for this step.\n'
+                '- "estimated_minutes": a whole number of minutes for this step (see the\n'
+                "  time rule above).\n\n"
+                "Answer with ONLY a valid JSON array, no other text and no markdown code block,\n"
+                "in exactly this format:\n"
+                '[{"title": "Short heading", "detail": "What to do here.", "estimated_minutes": 5}]\n')
+        else:
+            # The user left the time empty (or 0), so we must NOT invent any
+            # time. The steps get no "estimated_minutes" field at all.
+            time_block = (
+                "\nThe user did NOT give a time estimate. Do NOT invent any time for the\n"
+                'steps and do NOT include an "estimated_minutes" field at all.\n')
+            format_block = (
+                "FORMAT of each step:\n"
+                '- "title": a SHORT heading of 1 to 5 words. No sentences, no details here.\n'
+                '- "detail": one short sentence with the concrete instruction for this step.\n\n'
+                "Answer with ONLY a valid JSON array, no other text and no markdown code block,\n"
+                "in exactly this format:\n"
+                '[{"title": "Short heading", "detail": "What to do here."}]\n')
 
         return (
             "You are a coach inside a gamified to-do app for students with ADHD.\n"
@@ -211,41 +244,39 @@ class GeminiService:
             "chosen split level.\n\n"
             f"{level_instruction}\n\n"
             f'User task: "{raw_task_input}"\n'
-            f"{context_block}{estimate_block}\n"
+            f"{context_block}{time_block}\n"
             "VERY IMPORTANT about splitting the REAL task:\n"
             "- Break down the ACTUAL content of the task, not a generic template.\n"
             "- If the task lists items, numbers, exercises or pages (for example\n"
             '  "Eva no. 1-10" or "read pages 12-20"), turn EACH item (or a small group)\n'
             "  into its own step. Never merge many items into a single step.\n\n"
-            "FORMAT of each step:\n"
-            '- "title": a SHORT heading of 1 to 5 words. No sentences, no details here.\n'
-            '- "detail": one short sentence with the concrete instruction for this step.\n'
-            '- "estimated_minutes": a whole number inside the range for the chosen level.\n\n"'
-            "Answer with ONLY a valid JSON array, no other text and no markdown code block,\n"
-            "in exactly this format:\n"
-            '[{"title": "Short heading", "detail": "What to do here.", "estimated_minutes": 5}]\n')
+            f"{format_block}")
 
     def _level_instruction(self, split_level):
-        """Return the paragraph of prompt text describing the chosen split level."""
+        """Return the paragraph of prompt text describing the chosen split level.
+
+        This only describes how many steps to make and how big each step should
+        be. It does NOT talk about the "estimated_minutes" field, because whether
+        steps get a time at all is decided separately in _build_breakdown_prompt.
+        """
         if split_level == SPLIT_FINE:
             return (
                 "SPLIT LEVEL: FINE (split as much as possible).\n"
-                "Create MANY tiny steps of 2 to 8 minutes each. Make one step per real\n"
-                "sub-item of the task (for example one exercise number, one paragraph,\n"
-                "one page). You may return up to 20 steps. Do NOT group several items\n"
-                "into one step. Each step must be so small that it can never feel\n"
-                "overwhelming.")
+                "Create MANY tiny steps, each only a few minutes of work (about 2 to 8\n"
+                "minutes). Make one step per real sub-item of the task (for example one\n"
+                "exercise number, one paragraph, one page). You may return up to 20 steps.\n"
+                "Do NOT group several items into one step. Each step must be so small that\n"
+                "it can never feel overwhelming.")
         if split_level == SPLIT_COARSE:
             return (
                 "SPLIT LEVEL: COARSE (few large chunks).\n"
-                "Create BIG, demanding chunks of 30 to 45 minutes each. Use 3 to 4 steps,\n"
-                'each covering a large part of the task. "estimated_minutes" is between\n'
-                "30 and 45.")
+                "Create BIG, demanding chunks, each about 30 to 45 minutes of work. Use\n"
+                "3 to 4 steps, each covering a large part of the task.")
         # Medium is the balanced default.
         return (
             "SPLIT LEVEL: MEDIUM (balanced).\n"
-            "Create solid standard steps of 10 to 15 minutes each. Use 3 to 5 steps.\n"
-            '"estimated_minutes" is between 10 and 15.')
+            "Create solid standard steps, each about 10 to 15 minutes of work. Use 3 to\n"
+            "5 steps.")
 
     def _build_estimate_prompt(self, raw_task_input, description):
         """Build the prompt used by estimate_minutes to ask for a total duration."""
@@ -287,20 +318,129 @@ class GeminiService:
         parts = content["parts"]
         return parts[0]["text"]
 
-    def _parse_steps(self, answer_text, split_level):
+    def _parse_steps(self, answer_text, split_level, estimated_total_minutes):
         # The prompt asks for a JSON array of step objects; answer_text
         # should already be exactly that.
         array = json.loads(answer_text.strip())
         # Fine mode may return many steps; medium/coarse only a few.
         reward_level = split_level if split_level in (SPLIT_FINE, SPLIT_MEDIUM, SPLIT_COARSE) else SPLIT_MEDIUM
-        steps = []
+
+        # First read the title and detail of every step, plus the raw minutes
+        # the AI suggested (0 if it did not give any). We deal with the minutes
+        # afterwards, because they need to be looked at all together.
+        titles = []
+        details = []
+        raw_minutes = []
         for item in array:
-            # Fall back to safe defaults in case the AI ever leaves a field out.
-            title = self._shorten_title(str(item.get("title", "Step")))
-            detail = str(item.get("detail", "")) if item.get("detail") is not None else ""
-            minutes = self._read_int(item, 5, "estimated_minutes", "estimatedMinutes", "minutes")
+            titles.append(self._shorten_title(str(item.get("title", "Step"))))
+            if item.get("detail") is not None:
+                details.append(str(item.get("detail", "")))
+            else:
+                details.append("")
+            raw_minutes.append(
+                self._read_int(item, 0, "estimated_minutes", "estimatedMinutes", "minutes"))
+
+        # Decide the estimated time of each step:
+        if estimated_total_minutes > 0:
+            # The user gave a total, so every step gets a time and the parts have
+            # to add up to exactly that total. The AI is not perfectly reliable,
+            # so we adjust the numbers ourselves to guarantee the exact sum.
+            minutes_per_step = self._distribute_minutes(raw_minutes, estimated_total_minutes)
+        else:
+            # No total was given, so no step gets an estimated time (None).
+            minutes_per_step = []
+            for _ in titles:
+                minutes_per_step.append(None)
+
+        steps = []
+        for title, detail, minutes in zip(titles, details, minutes_per_step):
             steps.append(Task(title, reward_level, minutes, detail))
         return steps
+
+    def _distribute_minutes(self, raw_values, total):
+        """Turn the AI's rough per-step minutes into whole numbers that add up to
+        exactly `total`.
+
+        Steps that the AI thought were bigger (a higher raw value) get
+        proportionally more minutes, so this is NOT a plain even split. Every
+        step ends up with at least one minute.
+        """
+        count = len(raw_values)
+        if count == 0:
+            return []
+
+        # If the total is smaller than the number of steps, there is no way to
+        # give every step at least one minute AND still hit the total. In that
+        # rare case we raise the total to the number of steps, so each step can
+        # get its one minute.
+        if total < count:
+            total = count
+
+        # Add up the raw values so we can work out each step's share. Only
+        # positive values count as "weight"; a missing or zero value counts as 0.
+        weight_sum = 0
+        for value in raw_values:
+            if value > 0:
+                weight_sum += value
+
+        # If the AI gave no usable numbers at all, fall back to an even split by
+        # treating every step as equally heavy.
+        if weight_sum <= 0:
+            weights = []
+            for _ in raw_values:
+                weights.append(1)
+            weight_sum = count
+        else:
+            weights = []
+            for value in raw_values:
+                if value > 0:
+                    weights.append(value)
+                else:
+                    weights.append(0)
+
+        # Give each step its share of the total, rounded down, but never less
+        # than one minute.
+        minutes = []
+        for weight in weights:
+            share = int((total * weight) / weight_sum)
+            if share < 1:
+                share = 1
+            minutes.append(share)
+
+        # Rounding down (and the "at least one minute" rule) means the parts may
+        # not add up to the total yet. Hand out or take back single minutes, one
+        # at a time from the largest step, until the sum matches exactly.
+        difference = total - sum(minutes)
+        while difference > 0:
+            index = self._index_of_largest(minutes)
+            minutes[index] += 1
+            difference -= 1
+        while difference < 0:
+            index = self._index_of_largest_above_one(minutes)
+            if index is None:
+                # Every step is already at one minute; we cannot go any lower.
+                break
+            minutes[index] -= 1
+            difference += 1
+        return minutes
+
+    def _index_of_largest(self, values):
+        """Return the position of the biggest value in the list."""
+        best_index = 0
+        for index in range(1, len(values)):
+            if values[index] > values[best_index]:
+                best_index = index
+        return best_index
+
+    def _index_of_largest_above_one(self, values):
+        """Return the position of the biggest value that is still above one,
+        or None if every value is already one (or less)."""
+        best_index = None
+        for index in range(len(values)):
+            if values[index] > 1:
+                if best_index is None or values[index] > values[best_index]:
+                    best_index = index
+        return best_index
 
     def _shorten_title(self, title):
         """Safety net: keep the heading to at most 5 words."""

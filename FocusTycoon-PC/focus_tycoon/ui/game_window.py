@@ -716,9 +716,16 @@ class GameWindow:
         if task.detail:
             theme.draw_text(surface, self._shorten(task.detail, 70), 12, theme.MUTED, info_x, info_y)
             info_y += 18
-        meta = translate("meta_line").format(
-            level=self._split_level_name(task.energy_level),
-            minutes=task.estimated_minutes, gold=task.gold_reward)
+        # A step may have no estimated time at all. In that case we use a
+        # shorter meta line that leaves the minutes out completely.
+        if task.estimated_minutes is None:
+            meta = translate("meta_line_no_time").format(
+                level=self._split_level_name(task.energy_level),
+                gold=task.gold_reward)
+        else:
+            meta = translate("meta_line").format(
+                level=self._split_level_name(task.energy_level),
+                minutes=task.estimated_minutes, gold=task.gold_reward)
         theme.draw_text(surface, meta, 11, theme.MUTED, info_x, info_y)
 
         # Right side: a done button or a checkmark.
@@ -1090,8 +1097,14 @@ class GameWindow:
         recommendation = self.game.recommend_next_task()
         if recommendation is not None:
             self.recommended_task_id = recommendation.id
-            self.status = (f'Recommendation: "{recommendation.title}" - the smallest step '
-                           f"({recommendation.estimated_minutes} min) for a quick win.")
+            # The recommended step might have no estimated time, so only mention
+            # the minutes when we actually have them.
+            if recommendation.estimated_minutes is None:
+                self.status = (f'Recommendation: "{recommendation.title}" - '
+                               "a small step for a quick win.")
+            else:
+                self.status = (f'Recommendation: "{recommendation.title}" - the smallest step '
+                               f"({recommendation.estimated_minutes} min) for a quick win.")
         else:
             self.recommended_task_id = -1
             self.status = "All done - great! Type a new task."

@@ -18,6 +18,11 @@ from ..util.java_compat import java_round
 # How much gold one estimated minute of work is worth (before the focus bonus).
 GOLD_PER_MINUTE = 10
 
+# A step can have NO estimated time at all (estimated_minutes is None) when the
+# user did not enter a total time. Such a step still needs some gold reward, so
+# we base its reward on this default duration instead of a real estimate.
+DEFAULT_REWARD_MINUTES = 10
+
 # Every task gets a unique id. A lock keeps this safe if two threads create
 # tasks at the same time.
 _id_lock = threading.Lock()
@@ -60,15 +65,24 @@ def calculate_gold_reward(minutes: int, energy_level: int) -> int:
 
 
 class Task:
-    def __init__(self, title: str, energy_level: int, estimated_minutes: int,
+    def __init__(self, title: str, energy_level: int, estimated_minutes,
                  detail: str = "") -> None:
         self.id = create_next_task_id()
         self.title = title
         # A longer explanation of the step; the title stays a short heading.
         self.detail = detail
         self.energy_level = clamp_energy_level(energy_level)
-        self.estimated_minutes = max(1, estimated_minutes)
-        self.gold_reward = calculate_gold_reward(self.estimated_minutes, self.energy_level)
+        # estimated_minutes may be None, which means "no estimated time was
+        # given". In that case we show no time in the UI, but we still hand out
+        # a gold reward based on a default duration so finishing the step is
+        # never worth zero gold.
+        if estimated_minutes is None:
+            self.estimated_minutes = None
+            reward_minutes = DEFAULT_REWARD_MINUTES
+        else:
+            self.estimated_minutes = max(1, estimated_minutes)
+            reward_minutes = self.estimated_minutes
+        self.gold_reward = calculate_gold_reward(reward_minutes, self.energy_level)
         self.completed = False
 
     def __eq__(self, other: object) -> bool:
