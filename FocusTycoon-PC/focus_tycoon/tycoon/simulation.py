@@ -1,12 +1,13 @@
-"""Simulation: production, cheering / upgrading / unlocking and milestones.
+"""Simulation: production, upgrading / unlocking and milestones.
 
-Important change in this version: refineries no longer consume raw resources.
-Every producer simply makes its own resource. Resources are ONLY spent on
-upgrades, never when you deploy or cheer another producer. This removes the
-confusing "my points went down when I started another minion" effect.
+Base producers turn nothing into raw resources. Refineries consume their recipe
+inputs to make the next tier up, so there is a real crafting chain:
+raw -> refined -> master. A refinery with no inputs left simply idles; there is
+no penalty for running dry.
 
-The bottleneck is now purely gold: cheering (filling the tank) costs gold, and
-gold only comes from finishing real tasks.
+All production is driven by the Focus Surge: finishing a real task speeds every
+producer up for a while (see TycoonState). Gold, which also comes only from
+finishing tasks, is spent on permanent upgrades and on unlocking new sectors.
 """
 
 from __future__ import annotations
@@ -70,9 +71,14 @@ class ProductionSystem:
             return
 
         if definition.is_refinery():
-            # Refineries no longer eat raw materials - they just produce output.
+            # A refinery eats its recipe inputs to make the next tier. It can
+            # only make as many units as its inputs allow; if they have run out
+            # it makes less (or nothing) this tick and just idles.
             recipe = definition.recipe
-            output_amount = units_produced * recipe.output_per_unit
+            units_made = inventory.consume_for_output(recipe.inputs_per_unit, units_produced)
+            if units_made <= 0:
+                return
+            output_amount = units_made * recipe.output_per_unit
             inventory.add(recipe.output, output_amount)
             generator.add_unpulsed_output(output_amount)
             pulsed = generator.drain_pulse_if_ready(BalancingConfig.RESOURCE_JUICE_PULSE_THRESHOLD)

@@ -113,6 +113,32 @@ class Inventory:
             else:
                 self._stacks[resource] = amount
 
+    def consume_for_output(self, inputs_per_unit, desired_units):
+        """Consume inputs for up to `desired_units` of output, all in one locked
+        step, and return how many units could actually be made.
+
+        A refinery asks for `desired_units`, but we only let it make as many as
+        the scarcest input allows. If an input has run out the refinery simply
+        makes less (or nothing) - there is no penalty, it just idles. Doing the
+        check and the removal together under the lock stops two threads (the
+        simulation making things, the player spending resources on an upgrade)
+        from ever driving a stack below zero.
+        """
+        with self._lock:
+            units = desired_units
+            for resource, amount_per_unit in inputs_per_unit.items():
+                if amount_per_unit > 0:
+                    available = self._stacks.get(resource, 0.0)
+                    # This input can only support this many output units.
+                    units = min(units, available / amount_per_unit)
+            if units <= 0:
+                return 0.0
+            for resource, amount_per_unit in inputs_per_unit.items():
+                if amount_per_unit > 0:
+                    used = amount_per_unit * units
+                    self._stacks[resource] = max(0.0, self._stacks.get(resource, 0.0) - used)
+            return units
+
     def max_craftable_units(self, per_unit):
         with self._lock:
             max_units = math.inf
@@ -172,10 +198,11 @@ class Wallet(GoldAccount):
 # ---------------------------------------------------------------- Definitions
 
 class RecipeDefinition:
-    """A recipe that names the output of a refinery.
+    """A recipe for a refinery: which inputs it eats and what it makes.
 
-    In this version refineries no longer consume their inputs, so the recipe is
-    kept mainly for the output resource and the display name.
+    A refinery consumes `inputs_per_unit` of each input to make `output_per_unit`
+    of `output` per unit of work. This is the real crafting chain: raw resources
+    are refined into tier-1 goods, which are refined again into tier-2 masters.
     """
 
     def __init__(self, recipe_id, display_name, inputs_per_unit, output, output_per_unit):
