@@ -26,6 +26,18 @@ for fewer lines or maximum elegance.
   walrus operator tricks, or anything that needs to be re-read twice to
   understand. Prefer a few extra lines that are obvious at a glance.
 
+## Commit messages
+
+- Write commit subjects in English, in the imperative present tense - as if
+  finishing the sentence "This commit will ...". So "Add a sound toggle", not
+  "Added a sound toggle", "Adds ..." or "Sound toggle".
+- Start with a capital letter and a verb (Add, Remove, Fix, Rename, Revise,
+  Create, Move, ...). No full stop at the end.
+- Keep the subject short and to the point (a single line describing the change).
+- A body is optional: only add one when the change really needs explaining, and
+  keep it short. Most commits are just the one-line subject.
+- No emojis (same rule as the code above).
+
 ## What to include
 
 - Comments that explain the "why", not just repeat the code, but be
