@@ -116,6 +116,9 @@ class GameWindow:
         self.nav_tasks_rect = pygame.Rect(0, 0, 0, 0)
         self.nav_tycoon_rect = pygame.Rect(0, 0, 0, 0)
         self.tutorial_button_rect = pygame.Rect(0, 0, 0, 0)
+        # Real position is set every frame in _draw_navbar; start empty so an
+        # early click cannot collide with it before the first draw.
+        self.sound_button_rect = pygame.Rect(0, 0, 0, 0)
 
         # Confirm overlay (data reset).
         self.confirm_active = False
@@ -267,6 +270,11 @@ class GameWindow:
                 continue
             if self.tutorial_button_rect.collidepoint(position):
                 self._open_tutorial()
+                continue
+            if self.sound_button_rect.collidepoint(position):
+                # One click flips sound on/off; the button label updates on the
+                # next frame to show the new state.
+                self.tycoon.toggle_sound()
                 continue
 
             if self.page == PAGE_TASKS:
@@ -439,6 +447,22 @@ class GameWindow:
 
         self.language_dropdown.rect = pygame.Rect(
             self.tutorial_button_rect.x - 130, 16, 120, 32)
+
+        # Sound on/off button, placed just to the left of the language dropdown.
+        # Its label already says whether sound is currently on or off, so a
+        # single click flips between the two states.
+        if self.tycoon.is_sound_enabled():
+            sound_text = translate("sound_on")
+        else:
+            sound_text = translate("sound_off")
+        sound_width = theme.text_width(sound_text, 13, bold=True) + 28
+        self.sound_button_rect = pygame.Rect(
+            self.language_dropdown.rect.x - sound_width - 10, 16, sound_width, 32)
+        sound_hovered = self.sound_button_rect.collidepoint(mouse_pos)
+        sound_color = theme.brighter(theme.CARD_HI, 0.1) if sound_hovered else theme.CARD_HI
+        theme.rounded_rect(surface, self.sound_button_rect, sound_color, 16)
+        theme.draw_text_centered(surface, sound_text, 13, theme.TEXT,
+                                 self.sound_button_rect.centerx, self.sound_button_rect.centery, bold=True)
 
     def _draw_nav_buttons(self):
         surface = self.screen

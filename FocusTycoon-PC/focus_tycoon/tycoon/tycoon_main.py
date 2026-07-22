@@ -109,6 +109,17 @@ class TycoonPanel:
             return False
         return self._map_view.is_over_interactive(map_position[0], map_position[1])
 
+    # ---------- sound ----------
+
+    def is_sound_enabled(self):
+        return self._tone_player.is_enabled()
+
+    def toggle_sound(self):
+        """Flip sound on/off and return the new state (True = on)."""
+        new_state = not self._tone_player.is_enabled()
+        self._tone_player.set_enabled(new_state)
+        return new_state
+
     # ---------- lifecycle ----------
 
     def shutdown(self):

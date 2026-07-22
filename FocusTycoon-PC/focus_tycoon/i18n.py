@@ -24,6 +24,9 @@ TRANSLATIONS = {
         "gold_suffix": "Gold",
         "tutorial": "Tutorial",
         "language": "Language",
+        # Sound toggle button in the navbar.
+        "sound_on": "Sound: On",
+        "sound_off": "Sound: Off",
         # composer
         "plan_new_task": "Plan a new task",
         "composer_subtitle": "Type a big task and let it be split into doable steps.",
@@ -87,6 +90,9 @@ TRANSLATIONS = {
         "gold_suffix": "Gold",
         "tutorial": "Anleitung",
         "language": "Sprache",
+        # Sound toggle button in the navbar.
+        "sound_on": "Ton: An",
+        "sound_off": "Ton: Aus",
         "plan_new_task": "Neue Aufgabe planen",
         "composer_subtitle": "Gib eine grosse Aufgabe ein und lass sie in Schritte zerlegen.",
         "title_label": "Titel",

@@ -33,11 +33,3 @@ addition become scrollable with:
 - Arrow Up / Arrow Down (scroll by a small step)
 
 This applies to the tasks page scrollbar and to the new popup scrollbars above.
-
-## Sound: off by default, one simple toggle button
-
-Sound (`tycoon/ui/tone_player.py`) currently always plays if an audio device is
-available. Change this so sound starts **off** by default, and add one simple button
-(navbar or similar, next to the existing language dropdown) to turn it on and off.
-Keep the toggle itself simple - a single on/off button, no volume slider or settings
-menu.

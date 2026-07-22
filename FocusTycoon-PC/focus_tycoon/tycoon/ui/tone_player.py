@@ -68,6 +68,16 @@ class TonePlayer(SoundEffectSink):
     def __init__(self):
         self._available = pygame.mixer.get_init() is not None
         self._alive = True
+        # Sound starts OFF by default. The player can turn it on with the sound
+        # button in the navbar (see set_enabled below). Until then every play
+        # call stays silent even if an audio device is available.
+        self._enabled = False
+
+    def is_enabled(self):
+        return self._enabled
+
+    def set_enabled(self, enabled):
+        self._enabled = enabled
 
     def play_note(self, frequency_hz, duration_seconds, sparkle):
         self._play([(frequency_hz, duration_seconds, sparkle, 0.5)])
@@ -78,7 +88,9 @@ class TonePlayer(SoundEffectSink):
             self._play(tones)
 
     def _play(self, tones):
-        if not self._alive or not self._available:
+        # Stay silent when the sound is turned off, when we are shutting down,
+        # or when there is no working audio device.
+        if not self._enabled or not self._alive or not self._available:
             return
         try:
             # Join the tones one after another into a single buffer, so a "cue" made
