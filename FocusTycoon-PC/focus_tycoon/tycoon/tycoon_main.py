@@ -109,6 +109,17 @@ class TycoonPanel:
             return False
         return self._map_view.is_over_interactive(map_position[0], map_position[1])
 
+    # ---------- focus surge ----------
+
+    def trigger_focus_surge(self, reward_gold):
+        """Speed up all production for a while as a reward for finishing a task.
+
+        The bigger the task's gold reward, the longer the surge lasts (up to a
+        cap). Called from the tasks page whenever a step is completed.
+        """
+        seconds = reward_gold * BalancingConfig.SURGE_SECONDS_PER_GOLD
+        self.state.trigger_surge(seconds, BalancingConfig.SURGE_MAX_SECONDS)
+
     # ---------- sound ----------
 
     def is_sound_enabled(self):

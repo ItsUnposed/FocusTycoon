@@ -368,9 +368,46 @@ class TycoonState:
         self._inventory = Inventory()
         self._sectors = {}
         self._reached_milestones = set()
+        # Focus Surge: finishing a real task speeds up ALL production for a
+        # while. This is the number of seconds the surge still has left. It is
+        # transient (never saved) and drains a little on every simulation tick.
+        # A lock keeps it safe because the simulation thread drains it while the
+        # UI thread tops it up when a task is completed.
+        self._surge_seconds = 0.0
+        self._surge_lock = threading.Lock()
 
     def gold(self):
         return self._gold
+
+    # ---------- Focus Surge ----------
+
+    def trigger_surge(self, seconds, cap_seconds):
+        """Top up the surge timer by `seconds`, but never above `cap_seconds`."""
+        if seconds <= 0:
+            return
+        with self._surge_lock:
+            self._surge_seconds = min(cap_seconds, self._surge_seconds + seconds)
+
+    def drain_surge(self, elapsed_seconds):
+        """Let the surge run down by the time that passed this tick."""
+        with self._surge_lock:
+            if self._surge_seconds <= 0:
+                return
+            self._surge_seconds = max(0.0, self._surge_seconds - elapsed_seconds)
+
+    def surge_seconds_remaining(self):
+        with self._surge_lock:
+            return self._surge_seconds
+
+    def is_surging(self):
+        return self.surge_seconds_remaining() > 0
+
+    def surge_multiplier(self, active_multiplier):
+        """The production multiplier right now: `active_multiplier` while a surge
+        is running, otherwise 1.0 (normal slow trickle)."""
+        if self.is_surging():
+            return active_multiplier
+        return 1.0
 
     def inventory(self):
         return self._inventory

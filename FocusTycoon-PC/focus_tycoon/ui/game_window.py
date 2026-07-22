@@ -1251,6 +1251,10 @@ class GameWindow:
         was_complete = quest.is_completed() if quest is not None else False
         if self.game.complete_task(task_id):
             task = self.game.find_task(task_id)
+            # Finishing a task rewards the Tycoon with a Focus Surge: all
+            # producers speed up for a while, scaled by how much this step was
+            # worth. This is what ties the game economy to real work.
+            self.tycoon.trigger_focus_surge(task.gold_reward)
             now_complete = quest.is_completed() if quest is not None else False
             if now_complete and not was_complete:
                 self.status = f"Quest finished - great! +{task.gold_reward} gold. Moved to 'Done'."

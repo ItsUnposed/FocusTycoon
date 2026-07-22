@@ -35,21 +35,37 @@ class BalancingConfig:
     # Gold a fresh player starts with when the map runs standalone.
     STANDALONE_STARTING_GOLD = 300.0
 
+    # ---- Focus Surge: the reward for finishing a real task ----
+    # While a surge is running, every producer runs this many times faster than
+    # its normal slow trickle.
+    SURGE_ACTIVE_MULTIPLIER = 5.0
+    # Each point of gold a finished task was worth adds this many seconds of
+    # surge, so a bigger task keeps the islands humming for longer.
+    SURGE_SECONDS_PER_GOLD = 0.2
+    # The surge timer can never hold more than this, so a huge batch of tasks
+    # does not buy hours of boost at once.
+    SURGE_MAX_SECONDS = 600.0
+
 
 class ProductionSystem:
     """Runs every tick: drains fuel and produces resources."""
 
     def tick(self, elapsed_seconds, state, bus: JuiceEventBus):
+        # Let the Focus Surge run down a little each tick, then work out how much
+        # faster everything runs right now (5x while surging, 1x otherwise).
+        state.drain_surge(elapsed_seconds)
+        surge_multiplier = state.surge_multiplier(BalancingConfig.SURGE_ACTIVE_MULTIPLIER)
         for sector in state.sectors().values():
             if not sector.is_unlocked():
                 continue
             for generator in sector.generators():
                 generator.drain_fuel(elapsed_seconds)
-                self._produce(generator, elapsed_seconds, state.inventory(), bus)
+                self._produce(generator, elapsed_seconds, surge_multiplier, state.inventory(), bus)
 
-    def _produce(self, generator, elapsed_seconds, inventory, bus: JuiceEventBus):
+    def _produce(self, generator, elapsed_seconds, surge_multiplier, inventory, bus: JuiceEventBus):
         definition = generator.definition
-        units_produced = generator.current_output_per_second() * elapsed_seconds
+        # The surge speeds up every producer by the same factor.
+        units_produced = generator.current_output_per_second() * surge_multiplier * elapsed_seconds
         if units_produced <= 0:
             return
 
