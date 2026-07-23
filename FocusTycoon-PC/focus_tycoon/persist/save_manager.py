@@ -12,14 +12,10 @@ import threading
 from pathlib import Path
 
 from ..model.game_state import GameState
-from ..tycoon.model import TycoonState
-from .save_game import GeneratorData, QuestData, SaveGame, TaskData, TycoonData
+from ..tycoon.city_model import CityState
+from .save_game import CityBuildingData, CityData, QuestData, SaveGame, TaskData
 
-SAVE_VERSION = 1
-
-
-def round_to_three_decimals(value):
-    return round(value * 1000.0) / 1000.0
+SAVE_VERSION = 2
 
 
 class SaveManager:
@@ -59,7 +55,7 @@ class SaveManager:
             except Exception as error:
                 print(f"Could not save the game: {error}")
 
-    def _serialize(self, game: GameState, tycoon: TycoonState):
+    def _serialize(self, game: GameState, city: CityState):
         root = {"version": SAVE_VERSION, "gold": max(0, game.get_gold())}
 
         # Deletion rule: drop fully completed quests; keep partly-done quests
@@ -87,28 +83,19 @@ class SaveManager:
             })
         root["quests"] = quests
 
-        inventory = {}
-        for resource, amount in tycoon.inventory().snapshot().items():
-            # Skip resources the player has none of, to keep the save file small.
-            if amount > 0:
-                inventory[resource.id] = round_to_three_decimals(amount)
-
-        sectors = {}
-        for sector in tycoon.sectors().values():
-            sectors[sector.definition.id] = sector.is_unlocked()
-
-        generators = {}
-        for sector in tycoon.sectors().values():
-            for generator in sector.generators():
-                generators[generator.definition.id] = {
-                    "level": generator.level(),
-                }
-
-        root["tycoon"] = {
-            "inventory": inventory,
-            "sectors": sectors,
-            "generators": generators,
-            "milestones": list(tycoon.reached_milestone_ids()),
+        # The city: every placed building (type, tile and level) plus the
+        # milestones that have already been celebrated.
+        buildings = []
+        for building in city.buildings():
+            buildings.append({
+                "id": building.definition.id,
+                "x": building.grid_x,
+                "y": building.grid_y,
+                "level": building.level(),
+            })
+        root["city"] = {
+            "buildings": buildings,
+            "milestones": list(city.reached_milestone_ids()),
         }
         return root
 
@@ -121,8 +108,8 @@ class SaveManager:
             root = json.loads(self.save_file.read_text(encoding="utf-8"))
             gold = self._read_int(root.get("gold"), 0)
             quests = self._parse_quests(root.get("quests"))
-            tycoon = self._parse_tycoon(root.get("tycoon"))
-            return SaveGame(gold, quests, tycoon)
+            city = self._parse_city(root.get("city"))
+            return SaveGame(gold, quests, city)
         except Exception as error:
             print(f"Could not load the save game (ignored): {error}")
             return None
@@ -162,28 +149,26 @@ class SaveManager:
                 result.append(QuestData(title, energy_level, stages))
         return result
 
-    def _parse_tycoon(self, raw):
-        inventory = {}
-        sectors = {}
-        generators = {}
+    def _parse_city(self, raw):
+        # Read the city defensively: an old or damaged save should never crash
+        # the app, so unknown or missing fields just fall back to safe values.
+        buildings = []
         milestones = []
         if isinstance(raw, dict):
-            if isinstance(raw.get("inventory"), dict):
-                for key, value in raw["inventory"].items():
-                    inventory[str(key)] = self._read_float(value, 0.0)
-            if isinstance(raw.get("sectors"), dict):
-                for key, value in raw["sectors"].items():
-                    sectors[str(key)] = value is True
-            if isinstance(raw.get("generators"), dict):
-                for key, value in raw["generators"].items():
-                    if isinstance(value, dict):
-                        # Older saves also stored a "fuel" value; it no longer
-                        # exists in the new loop, so we just ignore it on load.
-                        generators[str(key)] = GeneratorData(
-                            self._read_int(value.get("level"), 1))
+            if isinstance(raw.get("buildings"), list):
+                for item in raw["buildings"]:
+                    if isinstance(item, dict):
+                        building_id = str(item.get("id", ""))
+                        if not building_id:
+                            continue
+                        buildings.append(CityBuildingData(
+                            building_id,
+                            self._read_int(item.get("x"), -1),
+                            self._read_int(item.get("y"), -1),
+                            self._read_int(item.get("level"), 1)))
             if isinstance(raw.get("milestones"), list):
                 milestones = [str(m) for m in raw["milestones"]]
-        return TycoonData(inventory, sectors, generators, milestones)
+        return CityData(buildings, milestones)
 
     def _read_optional_minutes(self, stage):
         # A step's estimated time is optional: it may be a number, or it may be
@@ -205,9 +190,4 @@ class SaveManager:
         # in the save file as a number.
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             return int(value)
-        return fallback
-
-    def _read_float(self, value, fallback):
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            return float(value)
         return fallback
