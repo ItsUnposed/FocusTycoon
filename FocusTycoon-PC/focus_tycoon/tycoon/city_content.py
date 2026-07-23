@@ -43,7 +43,7 @@ def build_catalog():
                            60, 1.7, 0, 1, (232, 214, 180), (176, 92, 74)),
         BuildingDefinition("apartment", "Apartment", RESIDENTIAL, 240, 12, 0.0, 5,
                            160, 1.8, 25, 3, (210, 200, 214), (120, 110, 150)),
-        BuildingDefinition("tower", "Residential Tower", RESIDENTIAL, 700, 34, 0.0, 5,
+        BuildingDefinition("tower", "Tower", RESIDENTIAL, 700, 34, 0.0, 5,
                            420, 1.9, 120, 5, (180, 200, 220), (90, 120, 160)),
         # ---- commercial: these add a small passive gold income ----
         BuildingDefinition("stall", "Market Stall", COMMERCIAL, 70, 0, 0.4, 4,
