@@ -78,6 +78,11 @@ class AutomationBought:
         self.product_id = product_id
 
 
+class GoldTraded:
+    def __init__(self, amount):
+        self.amount = amount
+
+
 # ---------------------------------------------------------------- systems
 
 class SkillSystem:
@@ -141,6 +146,14 @@ class ProductionSystem:
 class BusinessActions:
     def __init__(self, catalog):
         self._catalog = catalog
+
+    # ---- bootstrap trade ----
+
+    def trade_gold(self, state, amount, bus: JuiceEventBus):
+        traded = state.trade_gold_for_bargeld(amount)
+        if traded > 0:
+            bus.publish(GoldTraded(traded))
+        return traded
 
     # ---- skills ----
 

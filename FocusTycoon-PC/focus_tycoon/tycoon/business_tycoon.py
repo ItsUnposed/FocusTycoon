@@ -38,6 +38,10 @@ _SECTIONS = [
     (SECTION_PRODUCTS, "biz_tab_products"),
 ]
 
+# How much gold one click of the bootstrap trade converts (capped per day).
+TRADE_BATCH = 50
+GOLD = (245, 205, 96)
+
 
 class BusinessTycoon:
     name = "business"
@@ -59,9 +63,11 @@ class BusinessTycoon:
             production_system.tick(elapsed_seconds, self.state, self._bus)
 
         self._game_loop = GameLoop(BusinessBalance.TICK_RATE_HZ, tick)
+        self._actions = actions
         self._hud = BusinessHud(self.state, self._catalog)
         self._view = BusinessView(self.state, actions, self._bus, sound, self._catalog)
         self._subtab_rects = []
+        self._trade_button_rect = pygame.Rect(0, 0, 0, 0)
         self._game_loop.start()
 
     # ---------- frame ----------
@@ -101,9 +107,29 @@ class BusinessTycoon:
             self._subtab_rects.append((tab_rect, section))
             x += width + 8
 
+        # A right-aligned "trade gold for Bargeld" button (the bootstrap).
+        remaining = self.state.remaining_trades_today()
+        label = translate("biz_trade").format(remaining=remaining)
+        button_width = ui_fonts.base(12, bold=True).size(label)[0] + 28
+        button = pygame.Rect(rect.right - button_width - 12, rect.y + 7, button_width, SUBTAB_HEIGHT - 14)
+        enabled = remaining > 0 and self.state.gold().balance() >= 1
+        hover = button.collidepoint(pygame.mouse.get_pos())
+        if not enabled:
+            fill, text_color = SUBTAB_CARD, (120, 124, 148)
+        else:
+            fill, text_color = (SUBTAB_CARD_HI if hover else SUBTAB_CARD), GOLD
+        pygame.draw.rect(surface, fill, button, border_radius=button.height // 2)
+        pygame.draw.rect(surface, GOLD if enabled else (60, 64, 88), button, width=1, border_radius=button.height // 2)
+        text = ui_fonts.base(12, bold=True).render(label, True, text_color)
+        surface.blit(text, (button.centerx - text.get_width() // 2, button.centery - text.get_height() // 2))
+        self._trade_button_rect = button
+
     # ---------- input ----------
 
     def handle_click(self, position):
+        if self._trade_button_rect.collidepoint(position):
+            self._actions.trade_gold(self.state, TRADE_BATCH, self._bus)
+            return
         for tab_rect, section in self._subtab_rects:
             if tab_rect.collidepoint(position):
                 self._view.section = section
@@ -111,6 +137,8 @@ class BusinessTycoon:
         self._view.handle_click(position)
 
     def is_over_interactive(self, position):
+        if self._trade_button_rect.collidepoint(position):
+            return True
         for tab_rect, _ in self._subtab_rects:
             if tab_rect.collidepoint(position):
                 return True
@@ -144,12 +172,16 @@ class BusinessTycoon:
             "machines": machines,
             "prototypes": list(self.state.prototype_ids()),
             "products": products,
+            "tradedToday": self.state.traded_today(),
+            "tradeDate": self.state.trade_date(),
         }
 
     def _load_data(self, data):
         bargeld = data.get("bargeld")
         if _is_number(bargeld):
             self.state.restore_bargeld(float(bargeld))
+        traded = data.get("tradedToday")
+        self.state.restore_trades(traded if _is_int(traded) else 0, data.get("tradeDate", ""))
         if isinstance(data.get("skills"), dict):
             for skill_id, level in data["skills"].items():
                 instance = self.state.skill(str(skill_id))

@@ -12,9 +12,9 @@ import pygame
 
 from ...i18n import translate
 from ...util import ui_fonts
-from ..business_simulation import (AutomationBought, MachineBought, MachineBroke,
-                                  MachineRepaired, ProductSold, PrototypeDeveloped,
-                                  SkillLeveled)
+from ..business_simulation import (AutomationBought, GoldTraded, MachineBought,
+                                  MachineBroke, MachineRepaired, ProductSold,
+                                  PrototypeDeveloped, SkillLeveled)
 
 SECTION_SKILLS = "skills"
 SECTION_MACHINES = "machines"
@@ -58,7 +58,7 @@ class BusinessView:
     # ---------- sound feedback ----------
 
     def on_juice_event(self, event):
-        if isinstance(event, ProductSold):
+        if isinstance(event, (ProductSold, GoldTraded)):
             self.sound.play_note(659, 0.09, True)
         elif isinstance(event, (MachineBought, PrototypeDeveloped, AutomationBought)):
             self.sound.play_note(523, 0.10, False)

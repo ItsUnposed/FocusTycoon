@@ -21,11 +21,15 @@ thread and the UI thread, so shared parts are guarded by locks.
 
 from __future__ import annotations
 
+import datetime
 import math
 import threading
 
 # Bargeld a fresh startup begins with, so the very first product can be made.
 STARTING_BARGELD = 250.0
+# How much gold can be traded 1:1 into Bargeld per real day (a bootstrap so the
+# player can get started before any product earns money).
+DAILY_TRADE_CAP = 250
 
 
 def _grown(base, growth, level):
@@ -299,10 +303,53 @@ class BusinessState:
         self._machines = {}
         self._prototypes = set()
         self._products = {p.id: ProductLine(p) for p in catalog.products}
+        # Daily Gold->Bargeld trading (a bootstrap): how much was traded today.
+        self._traded_today = 0
+        self._trade_date = ""
         self._lock = threading.RLock()
 
     def gold(self):
         return self._gold
+
+    # ---------- Gold -> Bargeld trading (capped per day) ----------
+
+    def _refresh_trade_day(self):
+        today = datetime.date.today().isoformat()
+        if self._trade_date != today:
+            self._trade_date = today
+            self._traded_today = 0
+
+    def remaining_trades_today(self):
+        with self._lock:
+            self._refresh_trade_day()
+            return max(0, DAILY_TRADE_CAP - self._traded_today)
+
+    def trade_gold_for_bargeld(self, amount):
+        """Trade up to `amount` gold 1:1 into Bargeld, within today's cap and the
+        gold on hand. Returns how much was actually traded."""
+        with self._lock:
+            self._refresh_trade_day()
+            allowed = min(int(amount), DAILY_TRADE_CAP - self._traded_today, int(self._gold.balance()))
+            if allowed <= 0:
+                return 0
+            if not self._gold.try_spend(allowed):
+                return 0
+            self._bargeld += allowed
+            self._traded_today += allowed
+            return allowed
+
+    def traded_today(self):
+        with self._lock:
+            return self._traded_today
+
+    def trade_date(self):
+        with self._lock:
+            return self._trade_date
+
+    def restore_trades(self, traded_today, trade_date):
+        with self._lock:
+            self._trade_date = str(trade_date) if trade_date else ""
+            self._traded_today = max(0, traded_today)
 
     # ---------- Bargeld ----------
 
