@@ -13,9 +13,24 @@ still open for iteration: model, simulation, balancing and the pygame view
 ## Business tycoon: grants and investors
 
 The electrical-engineering business tycoon (`business_*` in `tycoon/`) has its core
-(machines, study, prototypes). Still to add: a fourth section for optional funding
-- "Foerderungen" (a grant button on a cooldown that gives free Bargeld or Wissen)
-and "Investoren" (spend Wissen / reputation for a big one-off Bargeld injection).
+(education/skills, machines, prototypes, products, the daily gold->Bargeld trade).
+Still to add: an optional funding section - "Foerderungen" (a grant button on a
+cooldown that gives free Bargeld) and "Investoren" (a big one-off Bargeld injection
+in exchange for something, e.g. a BWL skill / reputation).
+
+## Business tycoon: keep expanding / subdividing content
+
+Keep making everything more fine-grained and add more of it: more machines, more
+products and prototypes, more skills, deeper tiers. The chain should feel rich and
+long, closer to a real company. (The education/skills part and the degree gating
+are handled separately; this item is about the rest of the content.)
+
+## Business tycoon: balancing pass
+
+Tune all the numbers (skill gold costs and cooldowns, machine/prototype/product
+costs, material costs, sell prices, production times, break chances, automation
+costs, the degree costs/times) so the whole chain paces well over many days of
+tasks. Same for the city tycoon numbers.
 
 ## Full app UI overhaul (not the Tycoon)
 
