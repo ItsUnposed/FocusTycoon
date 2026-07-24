@@ -14,6 +14,7 @@ import pygame
 
 from ..i18n import translate
 from ..util import ui_fonts
+from .business_tycoon import BusinessTycoon
 from .city_tycoon import CityTycoon
 from .ui.tone_player import TonePlayer
 
@@ -37,6 +38,7 @@ class TycoonPanel:
         # The list of tycoons, in tab order. More can be added here later.
         self._tycoons = [
             CityTycoon(gold, self._tone_player, saved_tycoons.get("city")),
+            BusinessTycoon(gold, self._tone_player, saved_tycoons.get("business")),
         ]
         self._active = 0
         self._tab_rects = []
