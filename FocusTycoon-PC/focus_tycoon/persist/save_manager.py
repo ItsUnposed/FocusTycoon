@@ -12,10 +12,9 @@ import threading
 from pathlib import Path
 
 from ..model.game_state import GameState
-from ..tycoon.city_model import CityState
-from .save_game import CityBuildingData, CityData, QuestData, SaveGame, TaskData
+from .save_game import QuestData, SaveGame, TaskData
 
-SAVE_VERSION = 2
+SAVE_VERSION = 3
 
 
 class SaveManager:
@@ -41,11 +40,11 @@ class SaveManager:
 
     # ---------- saving ----------
 
-    def save(self, game: GameState, tycoon: TycoonState):
+    def save(self, game: GameState, tycoons_data):
         with self._lock:
             try:
                 self.save_file.parent.mkdir(parents=True, exist_ok=True)
-                text = json.dumps(self._serialize(game, tycoon), ensure_ascii=False, indent=2)
+                text = json.dumps(self._serialize(game, tycoons_data), ensure_ascii=False, indent=2)
                 # Write to a temporary file first, then rename it into place.
                 # If the app crashes mid-write, the real save file is never
                 # left half-written.
@@ -55,7 +54,7 @@ class SaveManager:
             except Exception as error:
                 print(f"Could not save the game: {error}")
 
-    def _serialize(self, game: GameState, city: CityState):
+    def _serialize(self, game: GameState, tycoons_data):
         root = {"version": SAVE_VERSION, "gold": max(0, game.get_gold())}
 
         # Deletion rule: drop fully completed quests; keep partly-done quests
@@ -83,21 +82,9 @@ class SaveManager:
             })
         root["quests"] = quests
 
-        # The city: every placed building (type, tile and level) plus the
-        # milestones that have already been celebrated.
-        buildings = []
-        for building in city.buildings():
-            buildings.append({
-                "id": building.definition.id,
-                "x": building.grid_x,
-                "y": building.grid_y,
-                "level": building.level(),
-            })
-        root["city"] = {
-            "buildings": buildings,
-            "coins": round(city.coins(), 2),
-            "milestones": list(city.reached_milestone_ids()),
-        }
+        # Each tycoon (city, business, ...) saves itself as a plain dict; we
+        # just store them keyed by tycoon name and never look inside here.
+        root["tycoons"] = tycoons_data if isinstance(tycoons_data, dict) else {}
         return root
 
     # ---------- loading ----------
@@ -109,8 +96,8 @@ class SaveManager:
             root = json.loads(self.save_file.read_text(encoding="utf-8"))
             gold = self._read_int(root.get("gold"), 0)
             quests = self._parse_quests(root.get("quests"))
-            city = self._parse_city(root.get("city"))
-            return SaveGame(gold, quests, city)
+            tycoons = self._parse_tycoons(root)
+            return SaveGame(gold, quests, tycoons)
         except Exception as error:
             print(f"Could not load the save game (ignored): {error}")
             return None
@@ -150,29 +137,17 @@ class SaveManager:
                 result.append(QuestData(title, energy_level, stages))
         return result
 
-    def _parse_city(self, raw):
-        # Read the city defensively: an old or damaged save should never crash
-        # the app, so unknown or missing fields just fall back to safe values.
-        buildings = []
-        milestones = []
-        coins = 0.0
+    def _parse_tycoons(self, root):
+        # Each tycoon's data is stored as an opaque dict; the tycoon itself reads
+        # it defensively when loading. Older saves kept the city under a top-level
+        # "city" key, so we wrap that into the new "tycoons" shape for them.
+        raw = root.get("tycoons")
         if isinstance(raw, dict):
-            if isinstance(raw.get("buildings"), list):
-                for item in raw["buildings"]:
-                    if isinstance(item, dict):
-                        building_id = str(item.get("id", ""))
-                        if not building_id:
-                            continue
-                        buildings.append(CityBuildingData(
-                            building_id,
-                            self._read_int(item.get("x"), -1),
-                            self._read_int(item.get("y"), -1),
-                            self._read_int(item.get("level"), 1)))
-            if isinstance(raw.get("coins"), (int, float)) and not isinstance(raw.get("coins"), bool):
-                coins = float(raw["coins"])
-            if isinstance(raw.get("milestones"), list):
-                milestones = [str(m) for m in raw["milestones"]]
-        return CityData(buildings, coins, milestones)
+            return {str(name): value for name, value in raw.items() if isinstance(value, dict)}
+        old_city = root.get("city")
+        if isinstance(old_city, dict):
+            return {"city": old_city}
+        return {}
 
     def _read_optional_minutes(self, stage):
         # A step's estimated time is optional: it may be a number, or it may be

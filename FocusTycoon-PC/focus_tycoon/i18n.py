@@ -118,6 +118,8 @@ TRANSLATIONS = {
         "status_recommend": 'Recommendation: "{title}" - the smallest step ({minutes} min) for a quick win.',
         "status_recommend_no_time": 'Recommendation: "{title}" - a small step for a quick win.',
         # ---- tycoon: city builder ----
+        "tycoon_tab_city": "City",
+        "tycoon_tab_business": "Business",
         "city_gold_label": "GOLD  -  build",
         "city_coins_label": "COINS  +{rate}/s",
         "city_residents_label": "RESIDENTS",
@@ -271,6 +273,8 @@ TRANSLATIONS = {
         "status_recommend": 'Empfehlung: "{title}" - der kleinste Schritt ({minutes} Min) fuer einen schnellen Erfolg.',
         "status_recommend_no_time": 'Empfehlung: "{title}" - ein kleiner Schritt fuer einen schnellen Erfolg.',
         # ---- tycoon: city builder ----
+        "tycoon_tab_city": "Stadt",
+        "tycoon_tab_business": "Business",
         "city_gold_label": "GOLD  -  bauen",
         "city_coins_label": "MUENZEN  +{rate}/s",
         "city_residents_label": "EINWOHNER",

@@ -1484,7 +1484,7 @@ class GameWindow:
             return 0
 
     def _save(self):
-        self.save_manager.save(self.game, self.tycoon.state)
+        self.save_manager.save(self.game, self.tycoon.save_data())
 
     def _on_close(self):
         self._save()
