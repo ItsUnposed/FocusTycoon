@@ -18,12 +18,6 @@ first building pops up above the group, then the rest spread out horizontally) s
 the player can pick which building of that group they want to place. Clicking away
 collapses the group again.
 
-## Tycoon: the placed-building popup says "gold/s" but it is Coins
-
-When a commercial building is placed, the floating popup shows something like
-"+X gold/s", but passive income is Coins now, not gold (see `_effect_text` in
-`tycoon/ui/city_view.py`). Fix the wording so it says Coins everywhere it should.
-
 ## Tycoon: richer hover tooltip
 
 Hovering a building (and a build-bar entry) should show a small tooltip with: what

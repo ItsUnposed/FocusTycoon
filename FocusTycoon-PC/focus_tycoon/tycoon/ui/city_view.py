@@ -6,7 +6,7 @@ skyline visibly grows as the city does.
 
 - A build bar along the bottom lists every building you can place. Click one to
   select it, then click an empty tile to build it (costs gold).
-- Click a building that is already there to upgrade it (costs gold).
+- Click a building that is already there to upgrade it (costs coins).
 
 The grid is drawn onto one fixed surface which the panel scales into place; the
 build bar is drawn at native size by the panel so its text stays crisp.
@@ -202,7 +202,7 @@ class CityView:
         if definition.base_population > 0:
             return f"+{definition.base_population} residents"
         if definition.base_income_per_second > 0:
-            return f"+{definition.base_income_per_second:g} gold/s"
+            return f"+{definition.base_income_per_second:g} coins/s"
         return "Built"
 
     def _add_float_at_tile(self, grid_x, grid_y, text, color):
