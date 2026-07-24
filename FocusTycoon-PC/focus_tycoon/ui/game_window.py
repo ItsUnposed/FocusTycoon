@@ -1169,7 +1169,7 @@ class GameWindow:
     def on_split(self):
         title = self.title_input.text.strip()
         if not title:
-            self.status = "Please enter a title first."
+            self.status = translate("status_title_first")
             return
         description = self.description_input.text.strip()
         split_level = SPLIT_LEVELS[self.split_choice_index]
@@ -1179,7 +1179,7 @@ class GameWindow:
         # before the first one is done. The actual call runs on a background
         # thread (see _run_in_background) so the window keeps responding.
         self.is_busy = True
-        self.status = "Splitting the task ..."
+        self.status = translate("status_splitting")
 
         def work():
             return self.game.process_new_task(title, description, split_level, minutes)
@@ -1187,9 +1187,10 @@ class GameWindow:
         def done(result):
             self.is_busy = False
             if isinstance(result, Exception):
-                self.status = f"Error: {result}"
+                self.status = translate("status_error").format(error=result)
                 return
-            self.status = f'Quest "{result.title}" created with {result.get_stage_count()} steps.'
+            self.status = translate("status_quest_created").format(
+                title=result.title, count=result.get_stage_count())
             self.title_input.text = ""
             self.description_input.text = ""
             self.estimate_input.text = ""
@@ -1200,11 +1201,11 @@ class GameWindow:
     def on_estimate_time(self):
         title = self.title_input.text.strip()
         if not title:
-            self.status = "Please enter a title first so the AI can estimate."
+            self.status = translate("status_title_first_estimate")
             return
         description = self.description_input.text.strip()
         self.is_busy = True
-        self.status = "The AI is estimating the duration ..."
+        self.status = translate("status_estimating")
 
         def work():
             return self.game.estimate_minutes(title, description)
@@ -1212,12 +1213,12 @@ class GameWindow:
         def done(result):
             self.is_busy = False
             if isinstance(result, Exception):
-                self.status = f"Error while estimating: {result}"
+                self.status = translate("status_estimate_error").format(error=result)
             elif result is not None:
                 self.estimate_input.text = str(result)
-                self.status = f"AI estimate: {result} minutes."
+                self.status = translate("status_estimate_result").format(minutes=result)
             else:
-                self.status = "AI estimate is not available."
+                self.status = translate("status_estimate_unavailable")
 
         self._run_in_background(work, done)
 
@@ -1228,14 +1229,13 @@ class GameWindow:
             # The recommended step might have no estimated time, so only mention
             # the minutes when we actually have them.
             if recommendation.estimated_minutes is None:
-                self.status = (f'Recommendation: "{recommendation.title}" - '
-                               "a small step for a quick win.")
+                self.status = translate("status_recommend_no_time").format(title=recommendation.title)
             else:
-                self.status = (f'Recommendation: "{recommendation.title}" - the smallest step '
-                               f"({recommendation.estimated_minutes} min) for a quick win.")
+                self.status = translate("status_recommend").format(
+                    title=recommendation.title, minutes=recommendation.estimated_minutes)
         else:
             self.recommended_task_id = -1
-            self.status = "All done - great! Type a new task."
+            self.status = translate("status_all_done")
 
     def on_move_up(self, task_id):
         self.game.move_stage_up(task_id)
@@ -1257,9 +1257,9 @@ class GameWindow:
             self.tycoon.trigger_focus_surge(task.gold_reward)
             now_complete = quest.is_completed() if quest is not None else False
             if now_complete and not was_complete:
-                self.status = f"Quest finished - great! +{task.gold_reward} gold. Moved to 'Done'."
+                self.status = translate("status_quest_finished").format(gold=task.gold_reward)
             else:
-                self.status = f"Done: +{task.gold_reward} gold!"
+                self.status = translate("status_task_done").format(gold=task.gold_reward)
             if task_id == self.recommended_task_id:
                 self.recommended_task_id = -1
             self._save()
@@ -1273,7 +1273,7 @@ class GameWindow:
         self.recommended_task_id = -1
         self.tycoon.shutdown()
         self.tycoon = build_panel(GameStateGoldAccount(self.game), None)
-        self.status = "All data has been reset."
+        self.status = translate("status_data_reset")
         self.page = PAGE_TASKS
         self.scroll_y = 0
 
@@ -1285,12 +1285,12 @@ class GameWindow:
     def _do_calendar_import(self, source, split_level):
         source = source.strip()
         if not source:
-            self.status = "Please enter a file path or a subscription URL."
+            self.status = translate("status_enter_path_url")
             return
         # The user can point us at either a local .ics file or a calendar
         # subscription URL - tell them apart by how the text starts.
         is_url = source.lower().startswith(("http://", "https://", "webcal://"))
-        self.status = "Loading the calendar ..."
+        self.status = translate("status_loading_calendar")
 
         def work():
             if is_url:
@@ -1309,15 +1309,15 @@ class GameWindow:
 
         def done(result):
             if isinstance(result, Exception):
-                self.status = f"Calendar import failed: {result}"
+                self.status = translate("status_calendar_failed").format(error=result)
                 return
             new_count, duplicate_count = result
             if new_count == 0 and duplicate_count == 0:
-                self.status = "No upcoming events found in the time window."
+                self.status = translate("status_no_events")
             else:
-                text = f"{new_count} event(s) imported and split into quests."
+                text = translate("status_calendar_imported").format(count=new_count)
                 if duplicate_count > 0:
-                    text += f" {duplicate_count} duplicate(s) skipped."
+                    text += translate("status_calendar_duplicates").format(count=duplicate_count)
                 self.status = text
             self._save()
 
@@ -1361,7 +1361,7 @@ class GameWindow:
             # closure above, so "apply" just ignores the argument it is given.
             def apply(_ignored):
                 if result.has_changes() or result.messages:
-                    self.status = "Portal auto-sync: " + result.summarize()
+                    self.status = translate("status_portal_autosync").format(summary=result.summarize())
             self.background_results.put((apply, None))
 
         from ..portal.portal_sync_service import DEFAULT_AUTO_SYNC_MINUTES
@@ -1369,7 +1369,7 @@ class GameWindow:
 
     def on_connect_portal(self):
         if self.portal_cipher is None:
-            self.status = "Portal disabled: set PORTAL_ENCRYPTION_KEY in ~/.focustycoon/portal.env."
+            self.status = translate("status_portal_disabled")
             return
         self._open_portal_modal()
 
@@ -1381,7 +1381,7 @@ class GameWindow:
 
         username = username.strip()
         if not username or not password:
-            self.status = "Please enter a username and a password."
+            self.status = translate("status_enter_user_pass")
             return
 
         # One login, but it can cover both portals (same user + password, two URLs).
@@ -1391,7 +1391,7 @@ class GameWindow:
         if iserv_url.strip():
             targets.append((PortalType.ISERV, iserv_url.strip()))
         if not targets:
-            self.status = "Please enter at least one school URL (Logineo or IServ)."
+            self.status = translate("status_enter_school_url")
             return
 
         connected_names = []
@@ -1405,19 +1405,19 @@ class GameWindow:
             self.credential_store.save(Credential(portal_type, username, encrypted, origin, None, None))
             connected_names.append(portal_type.display_name)
 
-        self.status = "Connected: " + ", ".join(connected_names) + ". Now press 'Sync portal'."
+        self.status = translate("status_connected").format(names=", ".join(connected_names))
         self._apply_portal_auto_sync()
 
     def on_sync_portal(self):
         if self.portal_sync is None:
-            self.status = "Portal disabled: set PORTAL_ENCRYPTION_KEY in ~/.focustycoon/portal.env."
+            self.status = translate("status_portal_disabled")
             return
         connected = self.credential_store.load_all()
         if not connected:
-            self.status = "No portal credentials found. Please connect a portal first."
+            self.status = translate("status_no_credentials")
             return
         portals = list(connected.keys())
-        self.status = "Syncing portal(s) ..."
+        self.status = translate("status_syncing")
 
         from ..portal.portal_exception import PortalException
 
@@ -1433,7 +1433,7 @@ class GameWindow:
 
         def done(result):
             if isinstance(result, Exception):
-                self.status = f"Portal sync failed: {result}"
+                self.status = translate("status_portal_failed").format(error=result)
             else:
                 self.status = result
             self._save()
@@ -1442,19 +1442,20 @@ class GameWindow:
 
     def on_decompose_homework(self, external_id):
         split_level = SPLIT_LEVELS[self.split_choice_index]
-        self.status = "Splitting the homework ..."
+        self.status = translate("status_splitting_homework")
 
         def work():
             return self.game.decompose_imported_homework(external_id, split_level)
 
         def done(result):
             if isinstance(result, Exception):
-                self.status = f"Error while splitting: {result}"
+                self.status = translate("status_split_error").format(error=result)
                 return
             if result is not None:
-                self.status = f'Homework split: "{result.title}" ({result.get_stage_count()} steps).'
+                self.status = translate("status_homework_split").format(
+                    title=result.title, count=result.get_stage_count())
             else:
-                self.status = "Homework was already split."
+                self.status = translate("status_homework_already")
             self._save()
 
         self._run_in_background(work, done)

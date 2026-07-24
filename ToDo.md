@@ -21,11 +21,6 @@ the app's main navbar) to switch between the different tycoons (city, business, 
 any future ones). The player can switch back and forth freely at any time; each
 tycoon keeps its own progress independently.
 
-## German localization gaps
-
-Some UI strings still show up in English while the app is in German mode. Find all of
-them and translate them, so German mode is fully German.
-
 ## Full app UI overhaul (not the Tycoon)
 
 Redesign the general app UI - the tasks page, the navbar, the dialogs, and so on
