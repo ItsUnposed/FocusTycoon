@@ -20,9 +20,13 @@ import threading
 import pygame
 
 from ...util import ui_fonts
+from ..city_model import CIVIC, COMMERCIAL, RESIDENTIAL
 from ..city_simulation import (BuildingPlaced, BuildingSold, BuildingUpgraded,
                               CityMilestoneReached)
 from ..juice import ParticleEffectRequest, ParticleStyle
+
+# Short labels for the building groups shown in the build bar.
+CATEGORY_LABELS = {RESIDENTIAL: "Homes", COMMERCIAL: "Shops", CIVIC: "Civic"}
 
 # ---- isometric geometry ----
 TILE_WIDTH = 64
@@ -137,10 +141,13 @@ class CityView:
         self.sell_mode = False
         # The "Sell" tool button in the build bar (its rect for hit-testing).
         self._sell_button_rect = pygame.Rect(0, 0, 0, 0)
-        # The build bar can hold more buildings than fit, so it scrolls sideways.
-        self._bar_scroll_x = 0.0
-        self._bar_max_scroll = 0.0
-        self._bar_region = pygame.Rect(0, 0, 0, 0)
+        # Buildings are grouped by category in the bar. Clicking a group fans its
+        # buildings out above the bar so the player can pick one.
+        self._groups = _build_groups(catalog)
+        self.expanded_category = None
+        self._group_buttons = []   # (rect, category) shown in the bar
+        self._fan_buttons = []     # (rect, definition) fanned out above the bar
+        self._fan_backing = pygame.Rect(0, 0, 0, 0)  # panel behind the fan-out
         # The tile the mouse is hovering over in grid coordinates (or None).
         self.hovered_tile = None
         # A short-lived status message shown near the build bar.
@@ -148,8 +155,6 @@ class CityView:
 
         self._floats = []
         self._floats_lock = threading.Lock()
-        # Button rectangles of the build bar, rebuilt every frame for hit-testing.
-        self._bar_buttons = []
 
     # ---------- lifecycle ----------
 
@@ -248,6 +253,8 @@ class CityView:
             self.hovered_tile = None
 
     def handle_map_click(self, map_x, map_y):
+        # Clicking the map closes any fanned-out building group.
+        self.expanded_category = None
         grid_x, grid_y = self.screen_to_grid(map_x, map_y)
         if not self.state.in_bounds(grid_x, grid_y):
             return
@@ -282,31 +289,64 @@ class CityView:
         else:
             self.status = f"Not enough gold ({int(definition.build_cost_gold)})."
 
-    def handle_build_bar_click(self, position):
-        # The sell tool is checked first.
+    def is_over_ui(self, position):
+        """Whether a point is over a build-bar control (sell / group / fan-out)."""
+        if self._sell_button_rect.collidepoint(position):
+            return True
+        # The whole fan-out panel counts, so a click near its buttons is not
+        # treated as a click on the map behind it.
+        if self.expanded_category is not None and self._fan_backing.collidepoint(position):
+            return True
+        for button_rect, _ in self._group_buttons:
+            if button_rect.collidepoint(position):
+                return True
+        return False
+
+    def handle_ui_click(self, position):
+        """Handle a click on the build bar (sell / group / fanned-out building).
+
+        Returns True if the click was on a build-bar control, so the panel knows
+        not to treat it as a click on the map.
+        """
+        # The sell tool.
         if self._sell_button_rect.collidepoint(position):
             self.sell_mode = not self.sell_mode
-            # Selling and placing are different modes, so turn placing off.
             self.selected_definition = None
-            return
-        # Building buttons only count inside the scrolling region, so a button
-        # scrolled partly out of view cannot be clicked through the edges.
-        if not self._bar_region.collidepoint(position):
-            return
-        for button_rect, definition in self._bar_buttons:
+            self.expanded_category = None
+            return True
+        # A fanned-out building button: pick that building.
+        for button_rect, definition in self._fan_buttons:
             if button_rect.collidepoint(position):
-                if definition.unlock_population > self.state.total_population():
-                    self.status = (f"{definition.display_name} unlocks at "
-                                   f"{definition.unlock_population} residents.")
-                    return
-                # Picking a building leaves sell mode.
+                self._pick_building(definition)
+                return True
+        # A click inside the fan-out panel but not on a button just closes it,
+        # and must not fall through to the map behind it.
+        if self.expanded_category is not None and self._fan_backing.collidepoint(position):
+            self.expanded_category = None
+            return True
+        # A group button: fan it out (or fold it back if it was already open).
+        for button_rect, category in self._group_buttons:
+            if button_rect.collidepoint(position):
                 self.sell_mode = False
-                # Clicking the already-selected building clears the selection.
-                if self.selected_definition is definition:
-                    self.selected_definition = None
+                if self.expanded_category == category:
+                    self.expanded_category = None
                 else:
-                    self.selected_definition = definition
-                return
+                    self.expanded_category = category
+                return True
+        return False
+
+    def _pick_building(self, definition):
+        if definition.unlock_population > self.state.total_population():
+            self.status = (f"{definition.display_name} unlocks at "
+                           f"{definition.unlock_population} residents.")
+            return
+        self.sell_mode = False
+        self.expanded_category = None
+        # Clicking the already-selected building clears the selection.
+        if self.selected_definition is definition:
+            self.selected_definition = None
+        else:
+            self.selected_definition = definition
 
     # ---------- painting: the map ----------
 
@@ -445,8 +485,8 @@ class CityView:
     def draw_build_bar(self, surface, rect):
         """Draw the bottom build bar and remember each button for hit-testing.
 
-        The Sell tool sits fixed on the left; the buildings fill a scrollable
-        region to its right (use the mouse wheel over the bar to scroll).
+        The Sell tool is on the far left, then one button per building group. The
+        group that is open fans its buildings out in a row above the bar.
         """
         pygame.draw.rect(surface, (24, 26, 40), rect)
         pygame.draw.rect(surface, (44, 46, 66), (rect.x, rect.y, rect.width, 1))
@@ -457,41 +497,88 @@ class CityView:
         y = rect.y + 10
         button_height = rect.height - 32
 
-        # The fixed Sell tool button on the far left.
+        # The Sell tool button on the far left.
         self._sell_button_rect = pygame.Rect(rect.x + 12, y, 78, button_height)
         self._draw_sell_button(surface, self._sell_button_rect, gold, mouse_pos)
 
-        # The scrollable region that holds the building buttons.
-        region = pygame.Rect(self._sell_button_rect.right + 10, rect.y,
-                             rect.right - (self._sell_button_rect.right + 10) - 4, rect.height)
-        self._bar_region = region
+        # One group button per category.
+        self._group_buttons = []
+        group_width = 118
+        gap = 8
+        x = self._sell_button_rect.right + gap
+        for category, definitions in self._groups:
+            group_rect = pygame.Rect(x, y, group_width, button_height)
+            self._draw_group_button(surface, group_rect, category, definitions, population, mouse_pos)
+            self._group_buttons.append((group_rect, category))
+            x += group_width + gap
 
-        button_width = 92
-        gap = 6
-        total_width = len(self.catalog) * (button_width + gap)
-        self._bar_max_scroll = max(0.0, total_width - region.width)
-        if self._bar_scroll_x > self._bar_max_scroll:
-            self._bar_scroll_x = self._bar_max_scroll
-
-        # Clip so buttons scrolled out of the region are not drawn over the rest.
-        previous_clip = surface.get_clip()
-        surface.set_clip(region)
-        self._bar_buttons = []
-        x = region.x - int(self._bar_scroll_x)
-        for definition in self.catalog:
-            button_rect = pygame.Rect(x, y, button_width, button_height)
-            self._draw_bar_button(surface, button_rect, definition, population, gold, mouse_pos)
-            self._bar_buttons.append((button_rect, definition))
-            x += button_width + gap
-        surface.set_clip(previous_clip)
+        # The open group's buildings, fanned out in a row above the bar.
+        self._draw_fan_out(surface, rect, population, gold, mouse_pos)
 
         # A small status / hint line under everything.
         hint = self.status if self.status else self._default_hint()
         surface.blit(ui_fonts.base(12).render(hint, True, MUTED), (rect.x + 12, rect.bottom - 18))
 
-    def scroll_build_bar(self, wheel_y):
-        # Positive wheel scrolls left, negative scrolls right - like a track pad.
-        self._bar_scroll_x = max(0.0, min(self._bar_max_scroll, self._bar_scroll_x - wheel_y * 60))
+    def _draw_group_button(self, surface, group_rect, category, definitions, population, mouse_pos):
+        is_open = self.expanded_category == category
+        if is_open:
+            fill, border = mix(ACCENT, CARD, 0.4), ACCENT
+        elif group_rect.collidepoint(mouse_pos):
+            fill, border = CARD_HI, (86, 92, 120)
+        else:
+            fill, border = CARD, (60, 64, 88)
+        pygame.draw.rect(surface, fill, group_rect, border_radius=8)
+        pygame.draw.rect(surface, border, group_rect, width=1, border_radius=8)
+        # Use the group's first (cheapest) building as the little icon.
+        self._draw_bar_icon(surface, group_rect.x + 20, group_rect.y + 28, definitions[0], False)
+        label = CATEGORY_LABELS.get(category, category.title())
+        surface.blit(ui_fonts.base(12, bold=True).render(label, True, INK),
+                     (group_rect.x + 38, group_rect.y + 8))
+        # How many of the group are unlocked so far, e.g. "3 / 6".
+        unlocked = sum(1 for d in definitions if d.unlock_population <= population)
+        surface.blit(ui_fonts.base(11).render(f"{unlocked} / {len(definitions)}", True, MUTED),
+                     (group_rect.x + 38, group_rect.y + 24))
+
+    def _draw_fan_out(self, surface, rect, population, gold, mouse_pos):
+        self._fan_buttons = []
+        self._fan_backing = pygame.Rect(0, 0, 0, 0)
+        if self.expanded_category is None:
+            return
+        definitions = []
+        anchor_x = rect.x + 12
+        for group_rect, category in self._group_buttons:
+            if category == self.expanded_category:
+                anchor_x = group_rect.x
+                definitions = dict(self._groups)[category]
+                break
+        if not definitions:
+            return
+
+        button_width = 92
+        gap = 6
+        button_height = rect.height - 32
+        # The row pops up just above the bar. Keep it on screen by shifting it
+        # left if it would run past the right edge.
+        row_width = len(definitions) * (button_width + gap) - gap
+        start_x = anchor_x
+        if start_x + row_width > rect.right - 12:
+            start_x = max(rect.x + 12, rect.right - 12 - row_width)
+        row_y = rect.y - button_height - 10
+
+        # A soft backing panel behind the fanned-out buttons for readability.
+        backing = pygame.Rect(start_x - 6, row_y - 6, row_width + 12, button_height + 12)
+        self._fan_backing = backing
+        panel = pygame.Surface((backing.width, backing.height), pygame.SRCALPHA)
+        panel.fill((18, 20, 32, 235))
+        surface.blit(panel, (backing.x, backing.y))
+        pygame.draw.rect(surface, (60, 64, 92), backing, width=1, border_radius=8)
+
+        x = start_x
+        for definition in definitions:
+            button_rect = pygame.Rect(x, row_y, button_width, button_height)
+            self._draw_bar_button(surface, button_rect, definition, population, gold, mouse_pos)
+            self._fan_buttons.append((button_rect, definition))
+            x += button_width + gap
 
     # ---------- painting: the hover tooltip (native size) ----------
 
@@ -599,7 +686,7 @@ class CityView:
             return "Sell mode: click a building to sell it for 75% of its gold cost. Click Sell again to stop."
         if self.selected_definition is not None:
             return f"Selected: {self.selected_definition.display_name} - click an empty tile to build."
-        return "Pick a building to build, or Sell to remove one. Click a built tile to upgrade it (coins)."
+        return "Open a group to pick a building, or Sell to remove one. Click a built tile to upgrade it (coins)."
 
     def _draw_bar_button(self, surface, button_rect, definition, population, gold, mouse_pos):
         locked = definition.unlock_population > population
@@ -625,7 +712,7 @@ class CityView:
         surface.blit(ui_fonts.base(11, bold=True).render(definition.display_name, True, name_color),
                      (button_rect.x + 38, button_rect.y + 8))
         if locked:
-            info = f"Locked - {definition.unlock_population} pop"
+            info = f"Unlock: {definition.unlock_population}"
             info_color = MUTED
         else:
             info = f"{int(definition.build_cost_gold)} gold"
@@ -656,3 +743,18 @@ def _depth_key(building):
     # Farther-back tiles have a smaller (x + y); drawing them first lets nearer
     # buildings paint on top.
     return building.grid_x + building.grid_y
+
+
+def _build_groups(catalog):
+    """Group the catalog by category, keeping the order categories first appear.
+
+    Returns a list of (category, [definitions]) pairs.
+    """
+    order = []
+    by_category = {}
+    for definition in catalog:
+        if definition.category not in by_category:
+            by_category[definition.category] = []
+            order.append(definition.category)
+        by_category[definition.category].append(definition)
+    return [(category, by_category[category]) for category in order]

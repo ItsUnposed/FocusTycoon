@@ -10,14 +10,6 @@ The Tycoon page (`tycoon/`) was reworked into an isometric city builder, but it 
 still open for iteration: model, simulation, balancing and the pygame view
 (`tycoon/ui/`) can all keep changing. The items below are the concrete next steps.
 
-## Tycoon: group buildings in the build bar
-
-Group the buildings in the build bar by category instead of showing them all in one
-long row. Each group is a single entry; clicking it makes the group "fan out" (the
-first building pops up above the group, then the rest spread out horizontally) so
-the player can pick which building of that group they want to place. Clicking away
-collapses the group again.
-
 ## Tycoon: a second, fully separate business
 
 Add a second "business" tycoon that is COMPLETELY separate from the city - its own
