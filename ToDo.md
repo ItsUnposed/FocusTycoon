@@ -10,6 +10,13 @@ The Tycoon page (`tycoon/`) was reworked into an isometric city builder, but it 
 still open for iteration: model, simulation, balancing and the pygame view
 (`tycoon/ui/`) can all keep changing. The items below are the concrete next steps.
 
+## Business tycoon: grants and investors
+
+The electrical-engineering business tycoon (`business_*` in `tycoon/`) has its core
+(machines, study, prototypes). Still to add: a fourth section for optional funding
+- "Foerderungen" (a grant button on a cooldown that gives free Bargeld or Wissen)
+and "Investoren" (spend Wissen / reputation for a big one-off Bargeld injection).
+
 ## Full app UI overhaul (not the Tycoon)
 
 Redesign the general app UI - the tasks page, the navbar, the dialogs, and so on
