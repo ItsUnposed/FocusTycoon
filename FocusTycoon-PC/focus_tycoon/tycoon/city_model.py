@@ -108,10 +108,39 @@ class CityState:
         # Buildings are stored by their (x, y) tile, so at most one per tile.
         self._buildings = {}
         self._reached_milestones = set()
+        # Coins are the city's own currency: commercial buildings earn them over
+        # time, and they are spent on upgrading buildings. Gold (from tasks) is a
+        # separate thing, used only to build new buildings.
+        self._coins = 0.0
         self._lock = threading.RLock()
 
     def gold(self):
         return self._gold
+
+    # ---------- coins (the city's own currency) ----------
+
+    def coins(self):
+        with self._lock:
+            return self._coins
+
+    def add_coins(self, amount):
+        if amount <= 0:
+            return
+        with self._lock:
+            self._coins += amount
+
+    def try_spend_coins(self, amount):
+        """Spend coins if there are enough; otherwise change nothing and return False."""
+        with self._lock:
+            if self._coins < amount:
+                return False
+            self._coins -= amount
+            return True
+
+    def set_coins(self, amount):
+        # Used when loading a save.
+        with self._lock:
+            self._coins = max(0.0, amount)
 
     # ---------- the grid ----------
 
@@ -137,6 +166,11 @@ class CityState:
     def place(self, instance):
         with self._lock:
             self._buildings[(instance.grid_x, instance.grid_y)] = instance
+
+    def remove_building(self, x, y):
+        """Remove the building on a tile. Returns True if one was there."""
+        with self._lock:
+            return self._buildings.pop((x, y), None) is not None
 
     # ---------- totals ----------
 

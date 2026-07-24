@@ -126,6 +126,11 @@ class TycoonPanel:
         if map_position is not None:
             self._city_view.handle_map_click(map_position[0], map_position[1])
 
+    def handle_scroll(self, wheel_y, position):
+        # The mouse wheel scrolls the build bar sideways when the cursor is over it.
+        if self._build_bar_rect.collidepoint(position):
+            self._city_view.scroll_build_bar(wheel_y)
+
     def is_over_interactive(self, position):
         if self._build_bar_rect.collidepoint(position):
             return True

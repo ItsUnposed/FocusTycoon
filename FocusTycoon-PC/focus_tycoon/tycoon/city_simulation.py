@@ -5,8 +5,8 @@ adds a little gold from the city's income buildings and checks whether any
 population milestone has just been reached. Building and upgrading happen on the
 UI thread through CityActions.
 
-City events (BuildingPlaced, BuildingUpgraded, CityMilestoneReached) are sent on
-the shared juice bus so the view can pop up a "+1", play a sound, and so on.
+City events (BuildingPlaced, BuildingUpgraded, BuildingSold, CityMilestoneReached)
+are sent on the shared juice bus so the view can pop up a "+1", play a sound, etc.
 """
 
 from __future__ import annotations
@@ -22,6 +22,8 @@ class CityBalance:
     TICK_RATE_HZ = 8
     # Gold a fresh player starts with when the city runs on its own (no tasks).
     STANDALONE_STARTING_GOLD = 300.0
+    # Selling a building refunds this share of its build cost (in gold).
+    SELL_REFUND_FRACTION = 0.75
 
 
 # ---------------------------------------------------------------- City events
@@ -41,6 +43,14 @@ class BuildingUpgraded:
         self.new_level = new_level
 
 
+class BuildingSold:
+    def __init__(self, building_id, grid_x, grid_y, refund_gold):
+        self.building_id = building_id
+        self.grid_x = grid_x
+        self.grid_y = grid_y
+        self.refund_gold = refund_gold
+
+
 class CityMilestoneReached:
     def __init__(self, milestone):
         self.milestone = milestone
@@ -49,22 +59,14 @@ class CityMilestoneReached:
 # ---------------------------------------------------------------- Systems
 
 class IncomeSystem:
-    """Adds the city's passive gold income to the shared balance each tick.
+    """Adds the city's passive coin income to the city treasury each tick.
 
-    The shared gold account only stores whole coins, and one tick's worth of
-    income is usually a fraction of a coin. So we keep the fractional part in
-    `_pending_gold` and only hand over whole coins once they add up.
+    Coins are the city's own currency (kept on the CityState, not the shared
+    gold account), so this can simply add the fractional amount every tick.
     """
 
-    def __init__(self):
-        self._pending_gold = 0.0
-
     def tick(self, elapsed_seconds, state, bus: JuiceEventBus):
-        self._pending_gold += state.total_income_per_second() * elapsed_seconds
-        if self._pending_gold >= 1.0:
-            whole_coins = int(self._pending_gold)
-            self._pending_gold -= whole_coins
-            state.gold().credit(whole_coins)
+        state.add_coins(state.total_income_per_second() * elapsed_seconds)
 
 
 class CityMilestoneSystem:
@@ -83,11 +85,11 @@ class CityMilestoneSystem:
 
 
 class CityActions:
-    """The two things the player does, both paid for with gold: build, upgrade."""
+    """The things the player does: build (gold), upgrade (coins), sell (refund)."""
 
     def build(self, state, definition, grid_x, grid_y, bus: JuiceEventBus):
-        """Place a new building on an empty tile. Returns False if the tile is
-        taken, the building is still locked, or there is not enough gold."""
+        """Place a new building on an empty tile, paid for in gold. Returns False
+        if the tile is taken, the building is still locked, or gold is short."""
         if not state.in_bounds(grid_x, grid_y):
             return False
         if not state.is_empty(grid_x, grid_y):
@@ -103,14 +105,25 @@ class CityActions:
         return True
 
     def upgrade(self, state, instance, bus: JuiceEventBus):
-        """Raise a building by one level, paying its gold cost. Returns False if
-        it is maxed out or there is not enough gold."""
+        """Raise a building by one level, paid for in coins (the city's own
+        currency). Returns False if it is maxed out or coins are short."""
         if not instance.can_upgrade():
             return False
         cost = instance.upgrade_cost()
-        if not state.gold().try_spend(cost):
+        if not state.try_spend_coins(cost):
             return False
         instance.upgrade()
         bus.publish(BuildingUpgraded(
             instance.definition.id, instance.grid_x, instance.grid_y, instance.level()))
+        return True
+
+    def sell(self, state, instance, bus: JuiceEventBus):
+        """Remove a building and refund part of its build cost as gold."""
+        refund = int(instance.definition.build_cost_gold * CityBalance.SELL_REFUND_FRACTION)
+        removed = state.remove_building(instance.grid_x, instance.grid_y)
+        if not removed:
+            return False
+        state.gold().credit(refund)
+        bus.publish(BuildingSold(
+            instance.definition.id, instance.grid_x, instance.grid_y, refund))
         return True

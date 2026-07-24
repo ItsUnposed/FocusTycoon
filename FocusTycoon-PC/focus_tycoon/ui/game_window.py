@@ -239,6 +239,9 @@ class GameWindow:
             elif event.type == pygame.MOUSEWHEEL and self.page == PAGE_TASKS:
                 # Clamp so the wheel can't scroll past the top or bottom of the list.
                 self.scroll_y = max(0, min(self.scroll_max, self.scroll_y - event.y * 40))
+            elif event.type == pygame.MOUSEWHEEL and self.page == PAGE_TYCOON:
+                # On the city page the wheel scrolls the build bar sideways.
+                self.tycoon.handle_scroll(event.y, pygame.mouse.get_pos())
             elif event.type == pygame.MOUSEMOTION and self.scroll_dragging:
                 self._drag_scrollbar(event.pos[1])
             elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:

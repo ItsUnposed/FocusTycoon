@@ -20,7 +20,8 @@ import threading
 import pygame
 
 from ...util import ui_fonts
-from ..city_simulation import BuildingPlaced, BuildingUpgraded, CityMilestoneReached
+from ..city_simulation import (BuildingPlaced, BuildingSold, BuildingUpgraded,
+                              CityMilestoneReached)
 from ..juice import ParticleEffectRequest, ParticleStyle
 
 # ---- isometric geometry ----
@@ -34,11 +35,12 @@ BUILDING_HALF_HEIGHT = HALF_HEIGHT - 3
 FLOOR_HEIGHT = 14
 BASE_HEIGHT = 10
 
-# The fixed surface the city is drawn onto (the panel scales this to fit).
-MAP_WIDTH = 440
-MAP_HEIGHT = 340
+# The fixed surface the city is drawn onto (the panel scales this to fit). Sized
+# for the largest grid, with headroom above for tall buildings on the back row.
+MAP_WIDTH = 700
+MAP_HEIGHT = 560
 ORIGIN_X = MAP_WIDTH // 2
-ORIGIN_Y = 104
+ORIGIN_Y = 160
 
 # ---- colours ----
 SKY_TOP = (26, 28, 46)
@@ -54,6 +56,7 @@ CARD_HI = (54, 58, 80)
 ACCENT = (122, 196, 255)
 SUCCESS = (120, 214, 150)
 DANGER = (226, 130, 130)
+SELL = (240, 170, 80)
 WINDOW = (250, 240, 190)
 
 
@@ -128,6 +131,14 @@ class CityView:
         self.clock = 0.0
         # The building type currently picked in the build bar (None = none).
         self.selected_definition = None
+        # Sell mode: while on, clicking a building sells it for a partial refund.
+        self.sell_mode = False
+        # The "Sell" tool button in the build bar (its rect for hit-testing).
+        self._sell_button_rect = pygame.Rect(0, 0, 0, 0)
+        # The build bar can hold more buildings than fit, so it scrolls sideways.
+        self._bar_scroll_x = 0.0
+        self._bar_max_scroll = 0.0
+        self._bar_region = pygame.Rect(0, 0, 0, 0)
         # The tile the mouse is hovering over in grid coordinates (or None).
         self.hovered_tile = None
         # A short-lived status message shown near the build bar.
@@ -167,6 +178,10 @@ class CityView:
             self._burst_at_tile(event.grid_x, event.grid_y, ParticleStyle.RUNE_RING, 24)
             self.screen_shaker.shake(0.5, 0.2)
             self.sound.play_note(659, 0.10, True)
+        elif isinstance(event, BuildingSold):
+            self._add_float_at_tile(event.grid_x, event.grid_y, f"+{event.refund_gold} gold", GOLD)
+            self._burst_at_tile(event.grid_x, event.grid_y, ParticleStyle.SPARKLE, 16)
+            self.sound.play_note(392, 0.10, False)
         elif isinstance(event, CityMilestoneReached):
             self._add_float(MAP_WIDTH / 2.0, MAP_HEIGHT * 0.3, event.milestone.description, GOLD, 16)
             self.particle_layer.spawn_burst(ParticleEffectRequest(None, ParticleStyle.CONFETTI, 60))
@@ -235,11 +250,18 @@ class CityView:
         if not self.state.in_bounds(grid_x, grid_y):
             return
         building = self.state.building_at(grid_x, grid_y)
+        # Sell mode: clicking a building sells it for a partial gold refund.
+        if self.sell_mode:
+            if building is not None:
+                self.actions.sell(self.state, building, self.bus)
+            else:
+                self.status = "Nothing to sell on this empty tile."
+            return
         if building is not None:
             # A tile with a building: try to upgrade it.
             if not self.actions.upgrade(self.state, building, self.bus):
                 if building.can_upgrade():
-                    self.status = "Not enough gold to upgrade."
+                    self.status = f"Not enough coins to upgrade ({int(building.upgrade_cost())})."
                 else:
                     self.status = f"{building.definition.display_name} is at max level."
             return
@@ -259,12 +281,24 @@ class CityView:
             self.status = f"Not enough gold ({int(definition.build_cost_gold)})."
 
     def handle_build_bar_click(self, position):
+        # The sell tool is checked first.
+        if self._sell_button_rect.collidepoint(position):
+            self.sell_mode = not self.sell_mode
+            # Selling and placing are different modes, so turn placing off.
+            self.selected_definition = None
+            return
+        # Building buttons only count inside the scrolling region, so a button
+        # scrolled partly out of view cannot be clicked through the edges.
+        if not self._bar_region.collidepoint(position):
+            return
         for button_rect, definition in self._bar_buttons:
             if button_rect.collidepoint(position):
                 if definition.unlock_population > self.state.total_population():
                     self.status = (f"{definition.display_name} unlocks at "
                                    f"{definition.unlock_population} residents.")
                     return
+                # Picking a building leaves sell mode.
+                self.sell_mode = False
                 # Clicking the already-selected building clears the selection.
                 if self.selected_definition is definition:
                     self.selected_definition = None
@@ -306,15 +340,24 @@ class CityView:
         pygame.draw.polygon(layer, base, points)
         pygame.draw.polygon(layer, GRASS_EDGE, points, 1)
 
-        # Highlight the hovered tile: green if we can act here, red if not.
+        # Highlight the hovered tile: green if the action here would work, red if not.
         if self.hovered_tile == (grid_x, grid_y):
-            empty = self.state.is_empty(grid_x, grid_y)
-            if empty and self.selected_definition is not None:
-                affordable = self.state.gold().balance() >= self.selected_definition.build_cost_gold
-                unlocked = self.selected_definition.unlock_population <= self.state.total_population()
-                good = affordable and unlocked
+            building = self.state.building_at(grid_x, grid_y)
+            # In sell mode a building tile glows orange ("sellable"); empty is red.
+            if self.sell_mode:
+                pygame.draw.polygon(layer, SELL if building is not None else DANGER, points, 2)
+                return
+            if building is None:
+                # Empty tile: green only if a building is picked and affordable.
+                if self.selected_definition is not None:
+                    affordable = self.state.gold().balance() >= self.selected_definition.build_cost_gold
+                    unlocked = self.selected_definition.unlock_population <= self.state.total_population()
+                    good = affordable and unlocked
+                else:
+                    good = False
             else:
-                good = not empty  # hovering a building = upgrade target
+                # A building: green only if it can be upgraded and we have the coins.
+                good = building.can_upgrade() and self.state.coins() >= building.upgrade_cost()
             glow = SUCCESS if good else DANGER
             pygame.draw.polygon(layer, glow, points, 2)
 
@@ -382,34 +425,77 @@ class CityView:
     # ---------- painting: the build bar (native size) ----------
 
     def draw_build_bar(self, surface, rect):
-        """Draw the bottom build bar and remember each button for hit-testing."""
+        """Draw the bottom build bar and remember each button for hit-testing.
+
+        The Sell tool sits fixed on the left; the buildings fill a scrollable
+        region to its right (use the mouse wheel over the bar to scroll).
+        """
         pygame.draw.rect(surface, (24, 26, 40), rect)
         pygame.draw.rect(surface, (44, 46, 66), (rect.x, rect.y, rect.width, 1))
 
         mouse_pos = pygame.mouse.get_pos()
         population = self.state.total_population()
         gold = self.state.gold().balance()
-
-        self._bar_buttons = []
-        button_width = 92
-        gap = 6
-        x = rect.x + 12
         y = rect.y + 10
         button_height = rect.height - 32
+
+        # The fixed Sell tool button on the far left.
+        self._sell_button_rect = pygame.Rect(rect.x + 12, y, 78, button_height)
+        self._draw_sell_button(surface, self._sell_button_rect, gold, mouse_pos)
+
+        # The scrollable region that holds the building buttons.
+        region = pygame.Rect(self._sell_button_rect.right + 10, rect.y,
+                             rect.right - (self._sell_button_rect.right + 10) - 4, rect.height)
+        self._bar_region = region
+
+        button_width = 92
+        gap = 6
+        total_width = len(self.catalog) * (button_width + gap)
+        self._bar_max_scroll = max(0.0, total_width - region.width)
+        if self._bar_scroll_x > self._bar_max_scroll:
+            self._bar_scroll_x = self._bar_max_scroll
+
+        # Clip so buttons scrolled out of the region are not drawn over the rest.
+        previous_clip = surface.get_clip()
+        surface.set_clip(region)
+        self._bar_buttons = []
+        x = region.x - int(self._bar_scroll_x)
         for definition in self.catalog:
             button_rect = pygame.Rect(x, y, button_width, button_height)
             self._draw_bar_button(surface, button_rect, definition, population, gold, mouse_pos)
             self._bar_buttons.append((button_rect, definition))
             x += button_width + gap
+        surface.set_clip(previous_clip)
 
-        # A small status / hint line under the buttons.
+        # A small status / hint line under everything.
         hint = self.status if self.status else self._default_hint()
         surface.blit(ui_fonts.base(12).render(hint, True, MUTED), (rect.x + 12, rect.bottom - 18))
 
+    def scroll_build_bar(self, wheel_y):
+        # Positive wheel scrolls left, negative scrolls right - like a track pad.
+        self._bar_scroll_x = max(0.0, min(self._bar_max_scroll, self._bar_scroll_x - wheel_y * 60))
+
+    def _draw_sell_button(self, surface, button_rect, gold, mouse_pos):
+        if self.sell_mode:
+            fill, border = mix(SELL, CARD, 0.35), SELL
+        elif button_rect.collidepoint(mouse_pos):
+            fill, border = CARD_HI, (86, 92, 120)
+        else:
+            fill, border = CARD, (60, 64, 88)
+        pygame.draw.rect(surface, fill, button_rect, border_radius=8)
+        pygame.draw.rect(surface, border, button_rect, width=1, border_radius=8)
+        text_color = SELL if not self.sell_mode else INK
+        surface.blit(ui_fonts.base(12, bold=True).render("Sell", True, text_color),
+                     (button_rect.x + 12, button_rect.y + 8))
+        surface.blit(ui_fonts.base(11).render("75% back", True, MUTED),
+                     (button_rect.x + 10, button_rect.y + 26))
+
     def _default_hint(self):
+        if self.sell_mode:
+            return "Sell mode: click a building to sell it for 75% of its gold cost. Click Sell again to stop."
         if self.selected_definition is not None:
             return f"Selected: {self.selected_definition.display_name} - click an empty tile to build."
-        return "Click a building to select it, then click a tile. Click a built tile to upgrade it."
+        return "Pick a building to build, or Sell to remove one. Click a built tile to upgrade it (coins)."
 
     def _draw_bar_button(self, surface, button_rect, definition, population, gold, mouse_pos):
         locked = definition.unlock_population > population

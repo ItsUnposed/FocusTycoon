@@ -95,6 +95,7 @@ class SaveManager:
             })
         root["city"] = {
             "buildings": buildings,
+            "coins": round(city.coins(), 2),
             "milestones": list(city.reached_milestone_ids()),
         }
         return root
@@ -154,6 +155,7 @@ class SaveManager:
         # the app, so unknown or missing fields just fall back to safe values.
         buildings = []
         milestones = []
+        coins = 0.0
         if isinstance(raw, dict):
             if isinstance(raw.get("buildings"), list):
                 for item in raw["buildings"]:
@@ -166,9 +168,11 @@ class SaveManager:
                             self._read_int(item.get("x"), -1),
                             self._read_int(item.get("y"), -1),
                             self._read_int(item.get("level"), 1)))
+            if isinstance(raw.get("coins"), (int, float)) and not isinstance(raw.get("coins"), bool):
+                coins = float(raw["coins"])
             if isinstance(raw.get("milestones"), list):
                 milestones = [str(m) for m in raw["milestones"]]
-        return CityData(buildings, milestones)
+        return CityData(buildings, coins, milestones)
 
     def _read_optional_minutes(self, stage):
         # A step's estimated time is optional: it may be a number, or it may be

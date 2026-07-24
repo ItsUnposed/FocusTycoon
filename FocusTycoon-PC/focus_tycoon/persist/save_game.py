@@ -42,8 +42,9 @@ class CityBuildingData:
 
 
 class CityData:
-    def __init__(self, buildings, milestones):
+    def __init__(self, buildings, coins, milestones):
         self.buildings = buildings
+        self.coins = coins
         self.milestones = milestones
 
 
@@ -79,6 +80,7 @@ class SaveGame:
         """
         if self.city is None:
             return
+        state.set_coins(self.city.coins)
         definitions_by_id = {definition.id: definition for definition in catalog}
         for building_data in self.city.buildings:
             definition = definitions_by_id.get(building_data.building_id)
