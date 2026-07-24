@@ -37,12 +37,16 @@ Each upgrade should give the building a slightly different texture / look, and t
 higher the level the more impressive ("krasser") it should look - so leveling up is
 clearly visible on the building itself, not just as a number.
 
-## Tycoon: a second business to build
+## Tycoon: a second, fully separate business
 
-Let the player build a separate "business" tycoon next to the city. It is also
-chosen / paid for with gold, and the player can switch freely between the different
-tycoons whenever they want. Important: the business does NOT use Coins - it has its
-own separate currency.
+Add a second "business" tycoon that is COMPLETELY separate from the city - its own
+world, its own state, its own currency (NOT the city's Coins). It is chosen / paid
+for with gold.
+
+The Tycoon page gets its own navbar (a navbar inside the Tycoon page, separate from
+the app's main navbar) to switch between the different tycoons (city, business, and
+any future ones). The player can switch back and forth freely at any time; each
+tycoon keeps its own progress independently.
 
 ## German localization gaps
 
