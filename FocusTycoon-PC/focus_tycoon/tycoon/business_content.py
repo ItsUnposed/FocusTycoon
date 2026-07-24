@@ -1,74 +1,87 @@
-"""The content of the electrical-engineering business tycoon.
+"""Content of the electrical-engineering business tycoon: skills, machines,
+prototypes and products, plus the starting state.
 
-Everything the player can interact with: machines to buy and collect, study
-courses to enroll in, and prototypes to develop. This is the only file to touch
-to add content - the engine never changes.
-
-Balancing follows the rest of the app: gold (from finishing real tasks) is the
-scarce startup capital that buys machines and pays tuition, while Bargeld and
-Wissen are gentler streams the business produces itself.
+The chain: Skills gate Machines and Prototypes; a Prototype unlocks a Product;
+producing a Product needs its Machine plus Bargeld for material; selling the
+product gives Bargeld back (the margin is the profit).
 """
 
 from __future__ import annotations
 
-from .business_model import (BusinessState, CourseDefinition, MachineDefinition,
-                            PrototypeDefinition)
+from .business_model import (BusinessState, MachineDefinition, PrototypeDefinition,
+                            ProductDefinition, SkillDefinition)
 
 
 class BusinessCatalog:
-    def __init__(self, machines, courses, prototypes):
+    def __init__(self, skills, machines, prototypes, products):
+        self.skills = skills
         self.machines = machines
-        self.courses = courses
         self.prototypes = prototypes
-        self.machine_by_id = {machine.id: machine for machine in machines}
-        self.course_by_id = {course.id: course for course in courses}
-        self.prototype_by_id = {prototype.id: prototype for prototype in prototypes}
+        self.products = products
+        self.skill_by_id = {s.id: s for s in skills}
+        self.machine_by_id = {m.id: m for m in machines}
+        self.prototype_by_id = {p.id: p for p in prototypes}
+        self.product_by_id = {p.id: p for p in products}
+        # Which prototype unlocks which product.
+        self.product_prototype = {p.unlock_product: p.id for p in prototypes if p.unlock_product}
 
 
-# Machines: (id, name, buy gold, bargeld/cycle, wissen/cycle, cycle secs, max
-# level, first-upgrade bargeld, upgrade growth, unlock prototype, accent).
+# Skills: (id, name, base gold cost, cost growth, base cooldown s, cooldown
+# growth, max level, accent).
+def _skills():
+    return [
+        SkillDefinition("grundlagen", "Basics", 60, 1.8, 20, 1.5, 5, (120, 190, 150)),
+        SkillDefinition("elektronik", "Electronics", 150, 1.8, 40, 1.5, 5, (200, 160, 100)),
+        SkillDefinition("fertigung", "Manufacturing", 300, 1.9, 60, 1.5, 5, (160, 150, 220)),
+        SkillDefinition("automatisierung", "Automation", 600, 1.9, 90, 1.5, 5, (150, 180, 220)),
+        SkillDefinition("bwl", "Business", 400, 1.8, 50, 1.5, 5, (210, 150, 220)),
+    ]
+
+
+# Machines: (id, name, buy bargeld, upgrade bargeld, upgrade growth, max level,
+# required skill id, required skill level, break chance, repair bargeld, accent).
 def _machines():
     return [
-        MachineDefinition("soldering", "Soldering Station", 60, 4, 0, 3.0, 5,
-                         40, 1.6, None, (230, 180, 90)),
-        MachineDefinition("psu", "Power Supply", 180, 14, 0, 6.0, 5,
-                         130, 1.7, None, (210, 120, 90)),
-        MachineDefinition("pcb", "PCB Printer", 500, 45, 1, 12.0, 5,
-                         380, 1.8, None, (120, 170, 140)),
-        MachineDefinition("lab", "Research Lab", 900, 0, 3, 10.0, 5,
-                         500, 1.8, None, (150, 140, 210)),
-        MachineDefinition("robot", "Assembly Robot", 2500, 220, 0, 20.0, 5,
-                         1600, 1.9, "proto_automation", (130, 150, 180)),
-        MachineDefinition("fab", "Chip Fab", 8000, 900, 4, 35.0, 5,
-                         5000, 2.0, "proto_semiconductor", (120, 126, 150)),
+        MachineDefinition("loetstation", "Soldering Station", 120, 80, 1.6, 5,
+                         "grundlagen", 1, 0.04, 40, (230, 180, 90)),
+        MachineDefinition("pruefstand", "Test Bench", 400, 260, 1.7, 5,
+                         "elektronik", 1, 0.05, 120, (210, 120, 90)),
+        MachineDefinition("drucker", "PCB Printer", 1000, 600, 1.8, 5,
+                         "fertigung", 1, 0.06, 300, (120, 170, 140)),
+        MachineDefinition("roboter", "Assembly Robot", 3000, 1800, 1.9, 5,
+                         "automatisierung", 2, 0.07, 800, (130, 150, 180)),
+        MachineDefinition("fab", "Chip Fab", 9000, 5000, 2.0, 5,
+                         "fertigung", 3, 0.08, 2500, (120, 126, 150)),
     ]
 
 
-# Courses: (id, name, enroll gold, wissen/second, max level, first-upgrade
-# bargeld, upgrade growth, accent).
-def _courses():
-    return [
-        CourseDefinition("basics", "Circuit Basics", 100, 0.5, 5, 80, 1.6, (120, 190, 150)),
-        CourseDefinition("power", "Power Electronics", 400, 1.5, 5, 300, 1.7, (200, 160, 100)),
-        CourseDefinition("micro", "Microelectronics", 1200, 4.0, 5, 900, 1.8, (160, 150, 220)),
-    ]
-
-
-# Prototypes: (id, name, cost wissen, cost bargeld, output bonus, unlocks
-# machine id or None, accent).
+# Prototypes: (id, name, bargeld cost, required skill, required level, unlocked
+# product id, accent).
 def _prototypes():
     return [
-        PrototypeDefinition("proto_efficiency", "Efficient Circuit", 40, 200, 0.25, None, (150, 210, 170)),
-        PrototypeDefinition("proto_automation", "Automation Rig", 120, 800, 0.15, "robot", (150, 180, 220)),
-        PrototypeDefinition("proto_semiconductor", "Semiconductor Process", 400, 3000, 0.25, "fab", (200, 170, 120)),
-        PrototypeDefinition("proto_ai", "Smart Controller", 900, 8000, 0.5, None, (210, 150, 220)),
+        PrototypeDefinition("proto_kabel", "Cable Design", 150, "grundlagen", 1, "kabel", (150, 210, 170)),
+        PrototypeDefinition("proto_netzteil", "Power Supply Design", 500, "elektronik", 2, "netzteil", (200, 170, 120)),
+        PrototypeDefinition("proto_platine", "PCB Design", 1400, "fertigung", 2, "platine", (150, 180, 220)),
+        PrototypeDefinition("proto_sensor", "Sensor Design", 4000, "automatisierung", 2, "sensor", (170, 150, 220)),
+        PrototypeDefinition("proto_chip", "Chip Design", 12000, "fertigung", 3, "chip", (210, 150, 220)),
+    ]
+
+
+# Products: (id, name, required machine id, material bargeld, produce seconds,
+# units per run, sell price bargeld, auto-produce cost, auto-sell cost, accent).
+def _products():
+    return [
+        ProductDefinition("kabel", "Cable", "loetstation", 8, 3.0, 1, 20, 300, 200, (230, 180, 90)),
+        ProductDefinition("netzteil", "Power Supply", "pruefstand", 30, 6.0, 1, 80, 900, 600, (210, 120, 90)),
+        ProductDefinition("platine", "Circuit Board", "drucker", 90, 10.0, 1, 260, 2500, 1600, (120, 170, 140)),
+        ProductDefinition("sensor", "Sensor", "roboter", 300, 15.0, 1, 900, 6000, 4000, (130, 150, 180)),
+        ProductDefinition("chip", "Chip", "fab", 1000, 25.0, 1, 3200, 18000, 12000, (120, 126, 150)),
     ]
 
 
 def build_catalog():
-    return BusinessCatalog(_machines(), _courses(), _prototypes())
+    return BusinessCatalog(_skills(), _machines(), _prototypes(), _products())
 
 
-def build_initial_state(gold):
-    """A brand-new startup: no machines, no courses, no prototypes, no money."""
-    return BusinessState(gold)
+def build_initial_state(gold, catalog):
+    return BusinessState(gold, catalog)

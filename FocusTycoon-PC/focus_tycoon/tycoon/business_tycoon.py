@@ -1,9 +1,10 @@
-"""The business tycoon: an electrical-engineering startup on the Tycoon page.
+"""The business tycoon: an electrical-engineering startup with a real production
+chain, on the Tycoon page.
 
-It owns its own simulation (machine cycles + study Wissen), state, view and HUD,
+It owns its own simulation (skill cooldowns + production), state, view and HUD,
 and exposes the same small interface as the city tycoon so the parent TycoonPanel
-can switch to it with the main tab navbar. Inside, a second row of sub-tabs
-switches between Machines, Study and Prototypes.
+can switch to it with the main tab navbar. Inside, a row of sub-tabs switches
+between Education, Machines, Prototypes and Products.
 """
 
 from __future__ import annotations
@@ -13,14 +14,14 @@ import pygame
 from ..i18n import translate
 from ..util import ui_fonts
 from .business_content import build_catalog, build_initial_state
-from .business_model import CourseInstance, MachineInstance
-from .business_simulation import (BusinessActions, BusinessBalance, ProgressSystem,
-                                 StudySystem)
+from .business_model import MachineInstance
+from .business_simulation import (BusinessActions, BusinessBalance, ProductionSystem,
+                                 SkillSystem)
 from .core import GameLoop
 from .juice import JuiceEventBus
 from .ui.business_hud import BusinessHud, HEIGHT as HUD_HEIGHT
-from .ui.business_view import (BusinessView, SECTION_MACHINES, SECTION_PROTOTYPES,
-                             SECTION_STUDY)
+from .ui.business_view import (BusinessView, SECTION_MACHINES, SECTION_PRODUCTS,
+                             SECTION_PROTOTYPES, SECTION_SKILLS)
 
 SUBTAB_HEIGHT = 40
 SUBTAB_BG = (14, 15, 24)
@@ -31,9 +32,10 @@ INK = (236, 238, 248)
 BG = (12, 13, 22)
 
 _SECTIONS = [
+    (SECTION_SKILLS, "biz_tab_education"),
     (SECTION_MACHINES, "biz_tab_machines"),
-    (SECTION_STUDY, "biz_tab_study"),
     (SECTION_PROTOTYPES, "biz_tab_prototypes"),
+    (SECTION_PRODUCTS, "biz_tab_products"),
 ]
 
 
@@ -43,18 +45,18 @@ class BusinessTycoon:
 
     def __init__(self, gold, sound, saved_data):
         self._catalog = build_catalog()
-        self.state = build_initial_state(gold)
+        self.state = build_initial_state(gold, self._catalog)
         if saved_data is not None:
             self._load_data(saved_data)
 
         self._bus = JuiceEventBus()
-        actions = BusinessActions()
-        progress_system = ProgressSystem()
-        study_system = StudySystem()
+        actions = BusinessActions(self._catalog)
+        skill_system = SkillSystem()
+        production_system = ProductionSystem(self._catalog)
 
         def tick(elapsed_seconds):
-            progress_system.tick(elapsed_seconds, self.state, self._bus)
-            study_system.tick(elapsed_seconds, self.state, self._bus)
+            skill_system.tick(elapsed_seconds, self.state, self._bus)
+            production_system.tick(elapsed_seconds, self.state, self._bus)
 
         self._game_loop = GameLoop(BusinessBalance.TICK_RATE_HZ, tick)
         self._hud = BusinessHud(self.state, self._catalog)
@@ -65,7 +67,7 @@ class BusinessTycoon:
     # ---------- frame ----------
 
     def update(self, elapsed_seconds):
-        pass  # the bars follow the state; no separate animation to advance
+        pass
 
     def render(self, surface, rect):
         hud_rect = pygame.Rect(rect.x, rect.y, rect.width, HUD_HEIGHT)
@@ -126,37 +128,37 @@ class BusinessTycoon:
     # ---------- persistence ----------
 
     def save_data(self):
+        skills = {sid: inst.level() for sid, inst in self.state.skills().items()}
         machines = []
         for instance in self.state.machines().values():
-            machines.append({
-                "id": instance.definition.id,
-                "level": instance.level(),
-                "progress": round(instance.progress(), 3),
-                "ready": instance.is_ready(),
-            })
-        courses = []
-        for instance in self.state.courses().values():
-            courses.append({"id": instance.definition.id, "level": instance.level()})
+            machines.append({"id": instance.definition.id, "level": instance.level(),
+                             "broken": instance.is_broken()})
+        products = []
+        for pid, line in self.state.product_lines().items():
+            if line.stock() > 0 or line.auto_produce() or line.auto_sell():
+                products.append({"id": pid, "stock": line.stock(),
+                                 "auto_produce": line.auto_produce(), "auto_sell": line.auto_sell()})
         return {
-            "machines": machines,
-            "courses": courses,
-            "prototypes": list(self.state.prototype_ids()),
             "bargeld": round(self.state.bargeld(), 2),
-            "wissen": round(self.state.wissen(), 2),
+            "skills": skills,
+            "machines": machines,
+            "prototypes": list(self.state.prototype_ids()),
+            "products": products,
         }
 
     def _load_data(self, data):
         bargeld = data.get("bargeld")
-        wissen = data.get("wissen")
-        self.state.restore(
-            float(bargeld) if _is_number(bargeld) else 0.0,
-            float(wissen) if _is_number(wissen) else 0.0)
-        # Prototypes first, so prototype-gated machines can be restored.
+        if _is_number(bargeld):
+            self.state.restore_bargeld(float(bargeld))
+        if isinstance(data.get("skills"), dict):
+            for skill_id, level in data["skills"].items():
+                instance = self.state.skill(str(skill_id))
+                if instance is not None and _is_int(level):
+                    instance.restore(level)
         if isinstance(data.get("prototypes"), list):
             for prototype_id in data["prototypes"]:
-                definition = self._catalog.prototype_by_id.get(str(prototype_id))
-                if definition is not None:
-                    self.state.develop_prototype(definition)
+                if str(prototype_id) in self._catalog.prototype_by_id:
+                    self.state.add_prototype(str(prototype_id))
         if isinstance(data.get("machines"), list):
             for item in data["machines"]:
                 if not isinstance(item, dict):
@@ -166,22 +168,18 @@ class BusinessTycoon:
                     continue
                 instance = MachineInstance(definition)
                 level = item.get("level")
-                progress = item.get("progress")
-                instance.restore(level if _is_int(level) else 1,
-                                 float(progress) if _is_number(progress) else 0.0,
-                                 item.get("ready") is True)
+                instance.restore(level if _is_int(level) else 1, item.get("broken") is True)
                 self.state.add_machine(instance)
-        if isinstance(data.get("courses"), list):
-            for item in data["courses"]:
+        if isinstance(data.get("products"), list):
+            for item in data["products"]:
                 if not isinstance(item, dict):
                     continue
-                definition = self._catalog.course_by_id.get(str(item.get("id", "")))
-                if definition is None or self.state.enrolled(definition.id):
+                line = self.state.product_line(str(item.get("id", "")))
+                if line is None:
                     continue
-                instance = CourseInstance(definition)
-                level = item.get("level")
-                instance.restore(level if _is_int(level) else 1)
-                self.state.add_course(instance)
+                stock = item.get("stock")
+                line.restore(stock if _is_int(stock) else 0,
+                             item.get("auto_produce") is True, item.get("auto_sell") is True)
 
 
 def _is_int(value):
