@@ -19,14 +19,18 @@ import threading
 
 import pygame
 
+from ...i18n import translate
 from ...util import ui_fonts
-from ..city_model import CIVIC, COMMERCIAL, RESIDENTIAL
 from ..city_simulation import (BuildingPlaced, BuildingSold, BuildingUpgraded,
                               CityMilestoneReached)
 from ..juice import ParticleEffectRequest, ParticleStyle
 
-# Short labels for the building groups shown in the build bar.
-CATEGORY_LABELS = {RESIDENTIAL: "Homes", COMMERCIAL: "Shops", CIVIC: "Civic"}
+
+def localized_name(definition):
+    """The building's name in the current language (falls back to English)."""
+    key = "building_" + definition.id
+    name = translate(key)
+    return definition.display_name if name == key else name
 
 # ---- isometric geometry ----
 TILE_WIDTH = 64
@@ -186,11 +190,12 @@ class CityView:
             self.screen_shaker.shake(0.5, 0.2)
             self.sound.play_note(659, 0.10, True)
         elif isinstance(event, BuildingSold):
-            self._add_float_at_tile(event.grid_x, event.grid_y, f"+{event.refund_gold} gold", GOLD)
+            self._add_float_at_tile(event.grid_x, event.grid_y,
+                                    translate("city_refund").format(gold=event.refund_gold), GOLD)
             self._burst_at_tile(event.grid_x, event.grid_y, ParticleStyle.SPARKLE, 16)
             self.sound.play_note(392, 0.10, False)
         elif isinstance(event, CityMilestoneReached):
-            self._add_float(MAP_WIDTH / 2.0, MAP_HEIGHT * 0.3, event.milestone.description, GOLD, 16)
+            self._add_float(MAP_WIDTH / 2.0, MAP_HEIGHT * 0.3, self._milestone_text(event.milestone), GOLD, 16)
             self.particle_layer.spawn_burst(ParticleEffectRequest(None, ParticleStyle.CONFETTI, 60))
             self.screen_shaker.shake(1.0, 0.4)
             self.sound.play_note(784, 0.16, True)
@@ -205,12 +210,17 @@ class CityView:
 
     def _effect_text(self, definition):
         if definition is None:
-            return "Built"
+            return translate("city_effect_built")
         if definition.base_population > 0:
-            return f"+{definition.base_population} residents"
+            return translate("city_effect_residents").format(count=definition.base_population)
         if definition.base_income_per_second > 0:
-            return f"+{definition.base_income_per_second:g} coins/s"
-        return "Built"
+            return translate("city_effect_coins").format(rate=f"{definition.base_income_per_second:g}")
+        return translate("city_effect_built")
+
+    def _milestone_text(self, milestone):
+        key = "milestone_" + milestone.id
+        text = translate(key)
+        return milestone.description if text == key else text
 
     def _add_float_at_tile(self, grid_x, grid_y, text, color):
         center_x, center_y = self._tile_center(grid_x, grid_y)
@@ -264,30 +274,31 @@ class CityView:
             if building is not None:
                 self.actions.sell(self.state, building, self.bus)
             else:
-                self.status = "Nothing to sell on this empty tile."
+                self.status = translate("city_msg_nothing_to_sell")
             return
         if building is not None:
             # A tile with a building: try to upgrade it.
             if not self.actions.upgrade(self.state, building, self.bus):
                 if building.can_upgrade():
-                    self.status = f"Not enough coins to upgrade ({int(building.upgrade_cost())})."
+                    self.status = translate("city_msg_need_coins").format(cost=int(building.upgrade_cost()))
                 else:
-                    self.status = f"{building.definition.display_name} is at max level."
+                    self.status = translate("city_msg_max_level").format(name=localized_name(building.definition))
             return
         # An empty tile: build the selected type here (if one is picked).
         if self.selected_definition is None:
-            self.status = "Pick a building from the bar below first."
+            self.status = translate("city_msg_pick_first")
             return
         self._try_build(self.selected_definition, grid_x, grid_y)
 
     def _try_build(self, definition, grid_x, grid_y):
         if definition.unlock_population > self.state.total_population():
-            self.status = f"{definition.display_name} unlocks at {definition.unlock_population} residents."
+            self.status = translate("city_msg_unlocks_at").format(
+                name=localized_name(definition), count=definition.unlock_population)
             return
         if self.actions.build(self.state, definition, grid_x, grid_y, self.bus):
             self.status = ""
         else:
-            self.status = f"Not enough gold ({int(definition.build_cost_gold)})."
+            self.status = translate("city_msg_need_gold").format(cost=int(definition.build_cost_gold))
 
     def is_over_ui(self, position):
         """Whether a point is over a build-bar control (sell / group / fan-out)."""
@@ -337,8 +348,8 @@ class CityView:
 
     def _pick_building(self, definition):
         if definition.unlock_population > self.state.total_population():
-            self.status = (f"{definition.display_name} unlocks at "
-                           f"{definition.unlock_population} residents.")
+            self.status = translate("city_msg_unlocks_at").format(
+                name=localized_name(definition), count=definition.unlock_population)
             return
         self.sell_mode = False
         self.expanded_category = None
@@ -531,7 +542,7 @@ class CityView:
         pygame.draw.rect(surface, border, group_rect, width=1, border_radius=8)
         # Use the group's first (cheapest) building as the little icon.
         self._draw_bar_icon(surface, group_rect.x + 20, group_rect.y + 28, definitions[0], False)
-        label = CATEGORY_LABELS.get(category, category.title())
+        label = translate("group_" + category)
         surface.blit(ui_fonts.base(12, bold=True).render(label, True, INK),
                      (group_rect.x + 38, group_rect.y + 8))
         # How many of the group are unlocked so far, e.g. "3 / 6".
@@ -607,34 +618,36 @@ class CityView:
 
     def _tooltip_for_building(self, building):
         definition = building.definition
-        lines = [(f"Level {building.level()} / {definition.max_level}", MUTED)]
+        lines = [(translate("city_tip_level").format(level=building.level(), max=definition.max_level), MUTED)]
         if definition.base_population > 0:
-            lines.append((f"{building.population()} residents", RESIDENT))
+            lines.append((translate("city_tip_residents").format(count=building.population()), RESIDENT))
         if definition.base_income_per_second > 0:
-            lines.append((f"+{building.income_per_second():g} coins/s", COIN))
+            lines.append((translate("city_tip_coins").format(rate=f"{building.income_per_second():g}"), COIN))
         if building.can_upgrade():
             affordable = self.state.coins() >= building.upgrade_cost()
-            lines.append((f"Upgrade: {building.upgrade_cost()} coins", COIN if affordable else DANGER))
+            lines.append((translate("city_tip_upgrade").format(cost=building.upgrade_cost()),
+                          COIN if affordable else DANGER))
         else:
-            lines.append(("Max level", MUTED))
+            lines.append((translate("city_tip_max"), MUTED))
         if self.sell_mode:
             refund = int(definition.build_cost_gold * 0.75)
-            lines.append((f"Sell: +{refund} gold", SELL))
-        return definition.display_name, lines
+            lines.append((translate("city_tip_sell").format(gold=refund), SELL))
+        return localized_name(definition), lines
 
     def _tooltip_for_definition(self, definition):
         locked = definition.unlock_population > self.state.total_population()
         lines = []
         if definition.base_population > 0:
-            lines.append((f"{definition.base_population} residents", RESIDENT))
+            lines.append((translate("city_tip_residents").format(count=definition.base_population), RESIDENT))
         if definition.base_income_per_second > 0:
-            lines.append((f"+{definition.base_income_per_second:g} coins/s", COIN))
+            lines.append((translate("city_tip_coins").format(rate=f"{definition.base_income_per_second:g}"), COIN))
         if locked:
-            lines.append((f"Locked until {definition.unlock_population} residents", DANGER))
+            lines.append((translate("city_tip_locked").format(count=definition.unlock_population), DANGER))
         else:
             affordable = self.state.gold().balance() >= definition.build_cost_gold
-            lines.append((f"Build: {int(definition.build_cost_gold)} gold", GOLD if affordable else DANGER))
-        return definition.display_name, lines
+            lines.append((translate("city_tip_build").format(gold=int(definition.build_cost_gold)),
+                          GOLD if affordable else DANGER))
+        return localized_name(definition), lines
 
     def _draw_tooltip_box(self, surface, mouse_pos, title, lines):
         title_font = ui_fonts.base(13, bold=True)
@@ -676,17 +689,17 @@ class CityView:
         pygame.draw.rect(surface, fill, button_rect, border_radius=8)
         pygame.draw.rect(surface, border, button_rect, width=1, border_radius=8)
         text_color = SELL if not self.sell_mode else INK
-        surface.blit(ui_fonts.base(12, bold=True).render("Sell", True, text_color),
+        surface.blit(ui_fonts.base(12, bold=True).render(translate("city_sell"), True, text_color),
                      (button_rect.x + 12, button_rect.y + 8))
-        surface.blit(ui_fonts.base(11).render("75% back", True, MUTED),
+        surface.blit(ui_fonts.base(11).render(translate("city_sell_sub"), True, MUTED),
                      (button_rect.x + 10, button_rect.y + 26))
 
     def _default_hint(self):
         if self.sell_mode:
-            return "Sell mode: click a building to sell it for 75% of its gold cost. Click Sell again to stop."
+            return translate("city_hint_sell")
         if self.selected_definition is not None:
-            return f"Selected: {self.selected_definition.display_name} - click an empty tile to build."
-        return "Open a group to pick a building, or Sell to remove one. Click a built tile to upgrade it (coins)."
+            return translate("city_hint_selected").format(name=localized_name(self.selected_definition))
+        return translate("city_hint_default")
 
     def _draw_bar_button(self, surface, button_rect, definition, population, gold, mouse_pos):
         locked = definition.unlock_population > population
@@ -709,13 +722,13 @@ class CityView:
         self._draw_bar_icon(surface, button_rect.x + 20, button_rect.y + 26, definition, locked)
 
         name_color = MUTED if locked else INK
-        surface.blit(ui_fonts.base(11, bold=True).render(definition.display_name, True, name_color),
+        surface.blit(ui_fonts.base(11, bold=True).render(localized_name(definition), True, name_color),
                      (button_rect.x + 38, button_rect.y + 8))
         if locked:
-            info = f"Unlock: {definition.unlock_population}"
+            info = translate("city_unlock_at").format(count=definition.unlock_population)
             info_color = MUTED
         else:
-            info = f"{int(definition.build_cost_gold)} gold"
+            info = translate("city_cost_gold").format(gold=int(definition.build_cost_gold))
             info_color = GOLD if affordable else DANGER
         surface.blit(ui_fonts.base(11).render(info, True, info_color),
                      (button_rect.x + 38, button_rect.y + 24))

@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import pygame
 
+from ...i18n import translate
 from ...util import ui_fonts
+from .city_view import localized_name
 
 GOLD = (245, 205, 96)
 COIN = (120, 214, 220)
@@ -41,28 +43,29 @@ class CityHud:
 
         # Gold (spent on building new buildings).
         gold_amount = max(0, round(self.state.gold().balance()))
-        self._draw_currency(panel, 20, GOLD, self._number(gold_amount), "GOLD  -  build")
+        self._draw_currency(panel, 20, GOLD, self._number(gold_amount), translate("city_gold_label"))
 
         # Coins (spent on upgrades), with the current income rate underneath.
         coins_amount = int(self.state.coins())
         income = self.state.total_income_per_second()
-        self._draw_currency(panel, 240, COIN, self._number(coins_amount), f"COINS  +{income:g}/s")
+        self._draw_currency(panel, 240, COIN, self._number(coins_amount),
+                            translate("city_coins_label").format(rate=f"{income:g}"))
 
         # Population.
         population = self.state.total_population()
         stats_x = 470
         panel.blit(ui_fonts.base(22, bold=True).render(str(population), True, INK), (stats_x, 16))
-        panel.blit(ui_fonts.base(11).render("RESIDENTS", True, MUTED), (stats_x, 44))
+        panel.blit(ui_fonts.base(11).render(translate("city_residents_label"), True, MUTED), (stats_x, 44))
 
         # Next goal on the right: the nearest building still locked.
         next_goal = self._next_goal(population)
         if next_goal is not None:
             definition, needed = next_goal
-            headline = f"Next: {definition.display_name}"
-            detail = f"at {needed} residents"
+            headline = translate("city_next").format(name=localized_name(definition))
+            detail = translate("city_next_at").format(count=needed)
         else:
-            headline = "All buildings unlocked"
-            detail = "Grow as big as you like"
+            headline = translate("city_all_unlocked")
+            detail = translate("city_grow_free")
         headline_surface = ui_fonts.base(13, bold=True).render(headline, True, INK)
         detail_surface = ui_fonts.base(11).render(detail, True, MUTED)
         panel.blit(headline_surface, (width - headline_surface.get_width() - 24, 16))
