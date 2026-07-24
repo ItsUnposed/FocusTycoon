@@ -10,17 +10,6 @@ The Tycoon page (`tycoon/`) was reworked into an isometric city builder, but it 
 still open for iteration: model, simulation, balancing and the pygame view
 (`tycoon/ui/`) can all keep changing. The items below are the concrete next steps.
 
-## Tycoon: a second, fully separate business
-
-Add a second "business" tycoon that is COMPLETELY separate from the city - its own
-world, its own state, its own currency (NOT the city's Coins). It is chosen / paid
-for with gold.
-
-The Tycoon page gets its own navbar (a navbar inside the Tycoon page, separate from
-the app's main navbar) to switch between the different tycoons (city, business, and
-any future ones). The player can switch back and forth freely at any time; each
-tycoon keeps its own progress independently.
-
 ## Full app UI overhaul (not the Tycoon)
 
 Redesign the general app UI - the tasks page, the navbar, the dialogs, and so on
