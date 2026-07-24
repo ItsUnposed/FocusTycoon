@@ -18,12 +18,6 @@ first building pops up above the group, then the rest spread out horizontally) s
 the player can pick which building of that group they want to place. Clicking away
 collapses the group again.
 
-## Tycoon: a different look per upgrade level
-
-Each upgrade should give the building a slightly different texture / look, and the
-higher the level the more impressive ("krasser") it should look - so leveling up is
-clearly visible on the building itself, not just as a number.
-
 ## Tycoon: a second, fully separate business
 
 Add a second "business" tycoon that is COMPLETELY separate from the city - its own

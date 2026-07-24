@@ -372,34 +372,50 @@ class CityView:
 
     def _paint_building(self, layer, building):
         definition = building.definition
+        level = building.level()
         center_x, center_y = self._tile_center(building.grid_x, building.grid_y)
 
-        # A park (0 floors) is just a raised green pad with a few trees.
+        # Each upgrade makes the building look a little "more": the colours get
+        # brighter and (for tall buildings) it gains extra floors, so a maxed-out
+        # building clearly stands out from a fresh one.
+        glow = min(0.05 * (level - 1), 0.22)
+        wall = brighter(definition.wall_color, glow)
+        roof = brighter(definition.roof_color, glow)
+        maxed = level >= definition.max_level
+
+        # A park / fountain (0 floors) is a raised pad with a few trees; higher
+        # levels get a couple more trees.
         if definition.floors <= 0:
             pad = self._diamond(center_x, center_y, BUILDING_HALF_WIDTH, BUILDING_HALF_HEIGHT, lift=3)
-            pygame.draw.polygon(layer, definition.roof_color, pad)
-            pygame.draw.polygon(layer, darker(definition.roof_color, 0.3), pad, 1)
-            for tree_x, tree_y in ((-6, 0), (6, -2), (0, 4)):
+            pygame.draw.polygon(layer, roof, pad)
+            pygame.draw.polygon(layer, darker(roof, 0.3), pad, 1)
+            tree_spots = [(-6, 0), (6, -2), (0, 4), (-3, -4), (4, 3)]
+            for tree_x, tree_y in tree_spots[:2 + level]:
                 pygame.draw.circle(layer, darker(GRASS_A, 0.1), (center_x + tree_x, center_y + tree_y - 6), 4)
             return
 
-        height = BASE_HEIGHT + definition.floors * FLOOR_HEIGHT
+        # Tall buildings grow by one extra floor every two levels.
+        drawn_floors = definition.floors + (level - 1) // 2
+        height = BASE_HEIGHT + drawn_floors * FLOOR_HEIGHT
         half_w, half_h = BUILDING_HALF_WIDTH, BUILDING_HALF_HEIGHT
         # Bottom diamond (sitting on the tile) and the raised top diamond.
         _, right, bottom, left = self._diamond(center_x, center_y, half_w, half_h)
         top_t, top_r, top_b, top_l = self._diamond(center_x, center_y, half_w, half_h, lift=height)
 
-        wall = definition.wall_color
         left_face = [left, bottom, top_b, top_l]
         right_face = [bottom, right, top_r, top_b]
         pygame.draw.polygon(layer, darker(wall, 0.34), left_face)
         pygame.draw.polygon(layer, darker(wall, 0.14), right_face)
         # The roof (top diamond) is the brightest face.
-        pygame.draw.polygon(layer, definition.roof_color, [top_t, top_r, top_b, top_l])
-        pygame.draw.polygon(layer, darker(definition.roof_color, 0.25),
-                            [top_t, top_r, top_b, top_l], 1)
+        pygame.draw.polygon(layer, roof, [top_t, top_r, top_b, top_l])
+        pygame.draw.polygon(layer, darker(roof, 0.25), [top_t, top_r, top_b, top_l], 1)
 
-        self._paint_windows(layer, center_x, center_y, definition.floors)
+        self._paint_windows(layer, center_x, center_y, drawn_floors)
+
+        # A maxed-out building gets a small golden cap on its roof as a crown.
+        if maxed:
+            cap_y = center_y - height
+            pygame.draw.circle(layer, (255, 214, 128), (center_x, cap_y), 3)
 
     def _paint_windows(self, layer, center_x, center_y, floors):
         # One little lit window per floor on each of the two visible walls.
