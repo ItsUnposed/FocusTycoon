@@ -57,6 +57,8 @@ ACCENT = (122, 196, 255)
 SUCCESS = (120, 214, 150)
 DANGER = (226, 130, 130)
 SELL = (240, 170, 80)
+COIN = (120, 214, 220)
+RESIDENT = (150, 210, 170)
 WINDOW = (250, 240, 190)
 
 
@@ -474,6 +476,92 @@ class CityView:
     def scroll_build_bar(self, wheel_y):
         # Positive wheel scrolls left, negative scrolls right - like a track pad.
         self._bar_scroll_x = max(0.0, min(self._bar_max_scroll, self._bar_scroll_x - wheel_y * 60))
+
+    # ---------- painting: the hover tooltip (native size) ----------
+
+    def hovered_building(self):
+        if self.hovered_tile is None:
+            return None
+        return self.state.building_at(self.hovered_tile[0], self.hovered_tile[1])
+
+    def draw_tooltip(self, surface, mouse_pos):
+        """Draw a small info box near the mouse for whatever it is hovering.
+
+        Over a built tile it shows the building's output, level and upgrade cost;
+        over an empty tile (with a building picked) it shows what that building
+        would give. Drawn at native size so the text stays crisp.
+        """
+        if self.hovered_tile is None:
+            return
+        building = self.hovered_building()
+        if building is not None:
+            title, lines = self._tooltip_for_building(building)
+        elif self.selected_definition is not None:
+            title, lines = self._tooltip_for_definition(self.selected_definition)
+        else:
+            return
+        self._draw_tooltip_box(surface, mouse_pos, title, lines)
+
+    def _tooltip_for_building(self, building):
+        definition = building.definition
+        lines = [(f"Level {building.level()} / {definition.max_level}", MUTED)]
+        if definition.base_population > 0:
+            lines.append((f"{building.population()} residents", RESIDENT))
+        if definition.base_income_per_second > 0:
+            lines.append((f"+{building.income_per_second():g} coins/s", COIN))
+        if building.can_upgrade():
+            affordable = self.state.coins() >= building.upgrade_cost()
+            lines.append((f"Upgrade: {building.upgrade_cost()} coins", COIN if affordable else DANGER))
+        else:
+            lines.append(("Max level", MUTED))
+        if self.sell_mode:
+            refund = int(definition.build_cost_gold * 0.75)
+            lines.append((f"Sell: +{refund} gold", SELL))
+        return definition.display_name, lines
+
+    def _tooltip_for_definition(self, definition):
+        locked = definition.unlock_population > self.state.total_population()
+        lines = []
+        if definition.base_population > 0:
+            lines.append((f"{definition.base_population} residents", RESIDENT))
+        if definition.base_income_per_second > 0:
+            lines.append((f"+{definition.base_income_per_second:g} coins/s", COIN))
+        if locked:
+            lines.append((f"Locked until {definition.unlock_population} residents", DANGER))
+        else:
+            affordable = self.state.gold().balance() >= definition.build_cost_gold
+            lines.append((f"Build: {int(definition.build_cost_gold)} gold", GOLD if affordable else DANGER))
+        return definition.display_name, lines
+
+    def _draw_tooltip_box(self, surface, mouse_pos, title, lines):
+        title_font = ui_fonts.base(13, bold=True)
+        line_font = ui_fonts.base(12)
+        padding = 10
+        line_height = 18
+        # The box is as wide as its widest line of text.
+        width = title_font.size(title)[0]
+        for text, _ in lines:
+            width = max(width, line_font.size(text)[0])
+        box_width = width + padding * 2
+        box_height = padding * 2 + line_height * (len(lines) + 1)
+
+        # Place it just below-right of the cursor, but keep it on screen.
+        x = mouse_pos[0] + 16
+        y = mouse_pos[1] + 16
+        if x + box_width > surface.get_width():
+            x = mouse_pos[0] - box_width - 16
+        if y + box_height > surface.get_height():
+            y = surface.get_height() - box_height - 4
+        box = pygame.Rect(x, y, box_width, box_height)
+        pygame.draw.rect(surface, (22, 24, 38), box, border_radius=8)
+        pygame.draw.rect(surface, (70, 74, 100), box, width=1, border_radius=8)
+
+        text_y = y + padding
+        surface.blit(title_font.render(title, True, INK), (x + padding, text_y))
+        text_y += line_height + 2
+        for text, color in lines:
+            surface.blit(line_font.render(text, True, color), (x + padding, text_y))
+            text_y += line_height
 
     def _draw_sell_button(self, surface, button_rect, gold, mouse_pos):
         if self.sell_mode:

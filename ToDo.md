@@ -18,13 +18,6 @@ first building pops up above the group, then the rest spread out horizontally) s
 the player can pick which building of that group they want to place. Clicking away
 collapses the group again.
 
-## Tycoon: richer hover tooltip
-
-Hovering a building (and a build-bar entry) should show a small tooltip with: what
-it gives (residents or Coins per second), its current level, and how far it can
-still be upgraded (for example "Level 3 / 5"). Right now hovering only highlights
-the tile.
-
 ## Tycoon: a different look per upgrade level
 
 Each upgrade should give the building a slightly different texture / look, and the

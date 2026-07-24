@@ -102,6 +102,9 @@ class TycoonPanel:
         scaled = pygame.transform.smoothscale(map_surface, (target_width, target_height))
         surface.blit(scaled, (origin_x, origin_y))
         self._city_view.draw_build_bar(surface, self._build_bar_rect)
+        # The hover tooltip is drawn last so it sits on top of everything, at
+        # native size for crisp text.
+        self._city_view.draw_tooltip(surface, pygame.mouse.get_pos())
 
     # ---------- input ----------
 
