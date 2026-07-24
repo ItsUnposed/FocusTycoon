@@ -1,14 +1,15 @@
-"""Business simulation: filling cycles and the player actions (buy / collect / upgrade).
+"""Business simulation for the electrical-engineering startup.
 
-The simulation thread fills each owned business's cycle a little every tick and
-fires a BusinessReady event when one is ready to collect. Buying, collecting and
-upgrading happen on the UI thread through BusinessActions. All player-visible
-moments go out on the shared juice bus so the view can react.
+The simulation thread fills machine cycles and trickles Wissen from enrolled
+study courses. The player buys machines (gold), collects them for Bargeld and
+Wissen, upgrades machines and courses (Bargeld), enrolls in courses (gold) and
+develops prototypes (Wissen + Bargeld). Every visible moment goes out on the
+shared juice bus so the view can react.
 """
 
 from __future__ import annotations
 
-from .business_model import BusinessInstance
+from .business_model import CourseInstance, MachineInstance
 from .juice import JuiceEventBus
 
 
@@ -19,80 +20,142 @@ class BusinessBalance:
 
 # ---------------------------------------------------------------- events
 
-class BusinessBought:
-    def __init__(self, business_id):
-        self.business_id = business_id
+class MachineBought:
+    def __init__(self, machine_id):
+        self.machine_id = machine_id
 
 
-class BusinessCollected:
-    def __init__(self, business_id, amount):
-        self.business_id = business_id
-        self.amount = amount
+class MachineCollected:
+    def __init__(self, machine_id, bargeld, wissen):
+        self.machine_id = machine_id
+        self.bargeld = bargeld
+        self.wissen = wissen
 
 
-class BusinessUpgraded:
-    def __init__(self, business_id, new_level):
-        self.business_id = business_id
+class MachineReady:
+    def __init__(self, machine_id):
+        self.machine_id = machine_id
+
+
+class MachineUpgraded:
+    def __init__(self, machine_id, new_level):
+        self.machine_id = machine_id
         self.new_level = new_level
 
 
-class BusinessReady:
-    def __init__(self, business_id):
-        self.business_id = business_id
+class CourseEnrolled:
+    def __init__(self, course_id):
+        self.course_id = course_id
+
+
+class CourseUpgraded:
+    def __init__(self, course_id, new_level):
+        self.course_id = course_id
+        self.new_level = new_level
+
+
+class PrototypeDeveloped:
+    def __init__(self, prototype_id):
+        self.prototype_id = prototype_id
 
 
 # ---------------------------------------------------------------- systems
 
 class ProgressSystem:
-    """Fills every owned business's cycle each tick."""
+    """Fills every machine's collect cycle each tick."""
 
     def tick(self, elapsed_seconds, state, bus: JuiceEventBus):
-        for instance in state.businesses().values():
-            just_ready = instance.advance(elapsed_seconds)
-            if just_ready:
-                bus.publish(BusinessReady(instance.definition.id))
+        for instance in state.machines().values():
+            if instance.advance(elapsed_seconds):
+                bus.publish(MachineReady(instance.definition.id))
 
+
+class StudySystem:
+    """Trickles Wissen from every enrolled course each tick."""
+
+    def tick(self, elapsed_seconds, state, bus: JuiceEventBus):
+        gained = state.wissen_per_second() * elapsed_seconds
+        if gained > 0:
+            state.earn_wissen(gained)
+
+
+# ---------------------------------------------------------------- actions
 
 class BusinessActions:
-    """The player actions: buy (gold), collect (cash in), upgrade (cash out)."""
+    """The player actions: buy / collect / upgrade machines, enroll / upgrade
+    courses, and develop prototypes."""
 
-    def buy(self, state, definition, bus: JuiceEventBus):
-        """Buy a business with gold. Returns False if already owned, still locked,
-        or there is not enough gold."""
-        if state.owns(definition.id):
+    # ---- machines ----
+
+    def buy_machine(self, state, definition, bus: JuiceEventBus):
+        if state.owns_machine(definition.id):
             return False
-        if definition.unlock_cash > state.lifetime_cash():
+        if definition.unlock_prototype and not state.has_prototype(definition.unlock_prototype):
             return False
         if not state.gold().try_spend(definition.buy_cost_gold):
             return False
-        state.add_business(BusinessInstance(definition))
-        bus.publish(BusinessBought(definition.id))
+        state.add_machine(MachineInstance(definition))
+        bus.publish(MachineBought(definition.id))
         return True
 
-    def collect(self, state, instance, bus: JuiceEventBus):
-        """Bank a ready business's profit as Cash. Returns the amount collected."""
-        amount = instance.collect()
-        if amount <= 0:
-            return 0.0
-        state.earn_cash(amount)
-        bus.publish(BusinessCollected(instance.definition.id, amount))
-        return amount
+    def collect_machine(self, state, instance, bus: JuiceEventBus):
+        bargeld, wissen = instance.collect()
+        if bargeld <= 0 and wissen <= 0:
+            return False
+        # Developed prototypes boost the Bargeld yield.
+        bargeld *= state.output_multiplier()
+        state.earn_bargeld(bargeld)
+        state.earn_wissen(wissen)
+        bus.publish(MachineCollected(instance.definition.id, bargeld, wissen))
+        return True
 
     def collect_all(self, state, bus: JuiceEventBus):
-        """Collect every business that is ready. Returns the total collected."""
-        total = 0.0
-        for instance in state.businesses().values():
-            total += self.collect(state, instance, bus)
-        return total
+        collected = False
+        for instance in state.machines().values():
+            if self.collect_machine(state, instance, bus):
+                collected = True
+        return collected
 
-    def upgrade(self, state, instance, bus: JuiceEventBus):
-        """Raise a business by one level, paid for in Cash. Returns False if it is
-        maxed out or there is not enough Cash."""
+    def upgrade_machine(self, state, instance, bus: JuiceEventBus):
         if not instance.can_upgrade():
             return False
-        cost = instance.upgrade_cost()
-        if not state.try_spend_cash(cost):
+        if not state.try_spend_bargeld(instance.upgrade_cost()):
             return False
         instance.upgrade()
-        bus.publish(BusinessUpgraded(instance.definition.id, instance.level()))
+        bus.publish(MachineUpgraded(instance.definition.id, instance.level()))
+        return True
+
+    # ---- courses ----
+
+    def enroll_course(self, state, definition, bus: JuiceEventBus):
+        if state.enrolled(definition.id):
+            return False
+        if not state.gold().try_spend(definition.enroll_cost_gold):
+            return False
+        state.add_course(CourseInstance(definition))
+        bus.publish(CourseEnrolled(definition.id))
+        return True
+
+    def upgrade_course(self, state, instance, bus: JuiceEventBus):
+        if not instance.can_upgrade():
+            return False
+        if not state.try_spend_bargeld(instance.upgrade_cost()):
+            return False
+        instance.upgrade()
+        bus.publish(CourseUpgraded(instance.definition.id, instance.level()))
+        return True
+
+    # ---- prototypes ----
+
+    def develop_prototype(self, state, definition, bus: JuiceEventBus):
+        if state.has_prototype(definition.id):
+            return False
+        # Pay Wissen first, then Bargeld; refund the Wissen if Bargeld is short.
+        if not state.try_spend_wissen(definition.cost_wissen):
+            return False
+        if not state.try_spend_bargeld(definition.cost_bargeld):
+            state.earn_wissen(definition.cost_wissen)
+            return False
+        state.develop_prototype(definition)
+        bus.publish(PrototypeDeveloped(definition.id))
         return True

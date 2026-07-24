@@ -1,7 +1,9 @@
-"""The slim status bar at the top of the business page.
+"""The status bar at the top of the business page.
 
-Shows the two currencies - gold (from tasks, spent buying businesses) and Cash
-(earned by the businesses, spent on upgrades) - plus the next business to unlock.
+Shows the three resources: Gold (from tasks - the startup capital that buys
+machines and pays tuition), Bargeld (the firm's money, from collecting machines)
+and Wissen (research, from studying). On the right it shows the current research
+output bonus from developed prototypes.
 """
 
 from __future__ import annotations
@@ -10,10 +12,10 @@ import pygame
 
 from ...i18n import translate
 from ...util import ui_fonts
-from .business_view import localized_business_name
 
 GOLD = (245, 205, 96)
-CASH = (140, 220, 150)
+BARGELD = (140, 220, 150)
+WISSEN = (180, 160, 235)
 INK = (236, 238, 248)
 MUTED = (168, 172, 194)
 
@@ -41,21 +43,19 @@ class BusinessHud:
         gold_amount = max(0, round(self.state.gold().balance()))
         self._draw_currency(panel, 20, GOLD, self._number(gold_amount), translate("biz_gold_label"))
 
-        cash_amount = int(self.state.cash())
-        rate = self.state.profit_per_second()
-        self._draw_currency(panel, 240, CASH, self._number(cash_amount),
-                            translate("biz_cash_label").format(rate=f"{rate:g}"))
+        bargeld_amount = int(self.state.bargeld())
+        self._draw_currency(panel, 250, BARGELD, self._number(bargeld_amount), translate("biz_bargeld_label"))
 
-        # Next business to unlock (by lifetime cash earned).
-        next_goal = self._next_unlock()
-        if next_goal is not None:
-            definition = next_goal
-            headline = translate("biz_next").format(name=localized_business_name(definition))
-            detail = translate("biz_next_at").format(cash=int(definition.unlock_cash))
-        else:
-            headline = translate("biz_all_owned")
-            detail = translate("biz_keep_growing")
-        headline_surface = ui_fonts.base(13, bold=True).render(headline, True, INK)
+        wissen_amount = int(self.state.wissen())
+        rate = self.state.wissen_per_second()
+        self._draw_currency(panel, 480, WISSEN, self._number(wissen_amount),
+                            translate("biz_wissen_label").format(rate=f"{rate:g}"))
+
+        # Research output bonus from developed prototypes (right side).
+        bonus_percent = round((self.state.output_multiplier() - 1.0) * 100)
+        headline = translate("biz_output_bonus").format(percent=bonus_percent)
+        detail = translate("biz_output_hint")
+        headline_surface = ui_fonts.base(13, bold=True).render(headline, True, WISSEN)
         detail_surface = ui_fonts.base(11).render(detail, True, MUTED)
         panel.blit(headline_surface, (width - headline_surface.get_width() - 24, 16))
         panel.blit(detail_surface, (width - detail_surface.get_width() - 24, 40))
@@ -69,15 +69,3 @@ class BusinessHud:
 
     def _number(self, value):
         return f"{value:,}".replace(",", ".")
-
-    def _next_unlock(self):
-        """The cheapest not-yet-owned, not-yet-unlocked business, if any."""
-        best = None
-        for definition in self.catalog:
-            if self.state.owns(definition.id):
-                continue
-            if definition.unlock_cash <= self.state.lifetime_cash():
-                continue
-            if best is None or definition.unlock_cash < best.unlock_cash:
-                best = definition
-        return best
