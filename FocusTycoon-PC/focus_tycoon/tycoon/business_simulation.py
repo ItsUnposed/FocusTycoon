@@ -35,6 +35,16 @@ class SkillLeveled:
         self.new_level = new_level
 
 
+class DegreeStarted:
+    def __init__(self, degree_id):
+        self.degree_id = degree_id
+
+
+class DegreeCompleted:
+    def __init__(self, degree_id):
+        self.degree_id = degree_id
+
+
 class MachineBought:
     def __init__(self, machine_id):
         self.machine_id = machine_id
@@ -93,6 +103,13 @@ class SkillSystem:
                 instance.tick(elapsed_seconds)
                 if instance.level() > was_level:
                     bus.publish(SkillLeveled(instance.definition.id, instance.level()))
+        # Degrees study over a long time; announce them when they finish.
+        for degree in state.degrees().values():
+            if degree.is_studying():
+                was_done = degree.is_completed()
+                degree.tick(elapsed_seconds)
+                if degree.is_completed() and not was_done:
+                    bus.publish(DegreeCompleted(degree.definition.id))
 
 
 class ProductionSystem:
@@ -124,7 +141,8 @@ class ProductionSystem:
         machine = state.machine(definition.required_machine)
         if machine is None or machine.is_broken():
             return
-        if not state.try_spend_bargeld(definition.material_cost_bargeld):
+        material = definition.material_cost_bargeld * state.material_multiplier()
+        if not state.try_spend_bargeld(material):
             return
         line.start_run()
 
@@ -132,7 +150,7 @@ class ProductionSystem:
         units = line.take_stock()
         if units <= 0:
             return
-        amount = units * line.definition.sell_price_bargeld
+        amount = units * line.definition.sell_price_bargeld * state.sell_multiplier()
         state.earn_bargeld(amount)
         bus.publish(ProductSold(line.definition.id, amount))
 
@@ -155,14 +173,32 @@ class BusinessActions:
             bus.publish(GoldTraded(traded))
         return traded
 
+    # ---- degrees ----
+
+    def study_degree(self, state, instance, bus: JuiceEventBus):
+        definition = instance.definition
+        if instance.is_completed() or instance.is_studying():
+            return False
+        if definition.requires_degree and not state.has_degree(definition.requires_degree):
+            return False
+        if not state.gold().try_spend(definition.cost_gold):
+            return False
+        instance.start_studying()
+        bus.publish(DegreeStarted(definition.id))
+        return True
+
     # ---- skills ----
 
     def level_skill(self, state, instance, bus: JuiceEventBus):
         if not instance.can_level():
             return False
+        # The skill's degree must be completed first.
+        if not state.skill_unlocked(instance.definition):
+            return False
         if not state.gold().try_spend(instance.cost_gold()):
             return False
-        instance.start_leveling()
+        # The Management skill shortens the level-up time.
+        instance.start_leveling(state.cooldown_multiplier())
         bus.publish(SkillLevelStarted(instance.definition.id))
         return True
 
@@ -222,7 +258,9 @@ class BusinessActions:
         machine = state.machine(definition.required_machine)
         if machine is None or machine.is_broken():
             return False
-        if not state.try_spend_bargeld(definition.material_cost_bargeld):
+        # Finance skill makes the material cheaper.
+        material = definition.material_cost_bargeld * state.material_multiplier()
+        if not state.try_spend_bargeld(material):
             return False
         line.start_run()
         return True
@@ -234,14 +272,15 @@ class BusinessActions:
         units = line.take_stock()
         if units <= 0:
             return False
-        amount = units * definition.sell_price_bargeld
+        # Marketing skill raises the price.
+        amount = units * definition.sell_price_bargeld * state.sell_multiplier()
         state.earn_bargeld(amount)
         bus.publish(ProductSold(definition.id, amount))
         return True
 
     def buy_auto_produce(self, state, definition, bus: JuiceEventBus):
         line = state.product_line(definition.id)
-        if line is None or line.auto_produce():
+        if line is None or line.auto_produce() or not state.automation_unlocked():
             return False
         if not state.try_spend_bargeld(definition.auto_produce_cost):
             return False
@@ -251,7 +290,7 @@ class BusinessActions:
 
     def buy_auto_sell(self, state, definition, bus: JuiceEventBus):
         line = state.product_line(definition.id)
-        if line is None or line.auto_sell():
+        if line is None or line.auto_sell() or not state.automation_unlocked():
             return False
         if not state.try_spend_bargeld(definition.auto_sell_cost):
             return False

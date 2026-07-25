@@ -21,15 +21,11 @@ thread and the UI thread, so shared parts are guarded by locks.
 
 from __future__ import annotations
 
-import datetime
 import math
 import threading
 
 # Bargeld a fresh startup begins with, so the very first product can be made.
 STARTING_BARGELD = 250.0
-# How much gold can be traded 1:1 into Bargeld per real day (a bootstrap so the
-# player can get started before any product earns money).
-DAILY_TRADE_CAP = 250
 
 
 def _grown(base, growth, level):
@@ -40,7 +36,7 @@ def _grown(base, growth, level):
 
 class SkillDefinition:
     def __init__(self, skill_id, display_name, base_cost_gold, cost_growth,
-                 base_cooldown_seconds, cooldown_growth, max_level, accent):
+                 base_cooldown_seconds, cooldown_growth, max_level, unlock_degree, accent):
         self.id = skill_id
         self.display_name = display_name
         self.base_cost_gold = base_cost_gold
@@ -48,6 +44,9 @@ class SkillDefinition:
         self.base_cooldown_seconds = base_cooldown_seconds
         self.cooldown_growth = cooldown_growth
         self.max_level = max_level
+        # A degree that must be completed before this skill can be leveled at all
+        # (None = available from the start).
+        self.unlock_degree = unlock_degree
         self.accent = accent
 
 
@@ -92,12 +91,13 @@ class SkillInstance:
                 return 0.0
             return max(0.0, min(1.0, 1.0 - self._remaining / total))
 
-    def start_leveling(self):
+    def start_leveling(self, time_multiplier=1.0):
         with self._lock:
             if self._leveling or self._level >= self.definition.max_level:
                 return
             self._leveling = True
-            self._remaining = self.definition.base_cooldown_seconds * (self.definition.cooldown_growth ** self._level)
+            base = self.definition.base_cooldown_seconds * (self.definition.cooldown_growth ** self._level)
+            self._remaining = base * time_multiplier
 
     def tick(self, elapsed_seconds):
         """Count the cooldown down; finish the level-up when it reaches zero."""
@@ -114,6 +114,71 @@ class SkillInstance:
         with self._lock:
             self._level = max(0, min(self.definition.max_level, level))
             self._leveling = False
+            self._remaining = 0.0
+
+
+# ---------------------------------------------------------------- degrees
+
+class DegreeDefinition:
+    def __init__(self, degree_id, display_name, cost_gold, study_seconds,
+                 requires_degree, accent):
+        self.id = degree_id
+        self.display_name = display_name
+        # Enrolling costs gold; the degree then takes a long study time.
+        self.cost_gold = cost_gold
+        self.study_seconds = study_seconds
+        # Another degree that must be completed first (or None).
+        self.requires_degree = requires_degree
+        self.accent = accent
+
+
+class DegreeInstance:
+    def __init__(self, definition):
+        self.definition = definition
+        self._completed = False
+        self._studying = False
+        self._remaining = 0.0
+        self._lock = threading.RLock()
+
+    def is_completed(self):
+        with self._lock:
+            return self._completed
+
+    def is_studying(self):
+        with self._lock:
+            return self._studying
+
+    def remaining_seconds(self):
+        with self._lock:
+            return self._remaining
+
+    def fraction(self):
+        with self._lock:
+            if not self._studying or self.definition.study_seconds <= 0:
+                return 0.0
+            return max(0.0, min(1.0, 1.0 - self._remaining / self.definition.study_seconds))
+
+    def start_studying(self):
+        with self._lock:
+            if self._completed or self._studying:
+                return
+            self._studying = True
+            self._remaining = self.definition.study_seconds
+
+    def tick(self, elapsed_seconds):
+        with self._lock:
+            if not self._studying:
+                return
+            self._remaining -= elapsed_seconds
+            if self._remaining <= 0:
+                self._remaining = 0.0
+                self._studying = False
+                self._completed = True
+
+    def restore(self, completed):
+        with self._lock:
+            self._completed = bool(completed)
+            self._studying = False
             self._remaining = 0.0
 
 
@@ -300,56 +365,28 @@ class BusinessState:
         self._gold = gold
         self._bargeld = STARTING_BARGELD
         self._skills = {s.id: SkillInstance(s) for s in catalog.skills}
+        self._degrees = {d.id: DegreeInstance(d) for d in catalog.degrees}
         self._machines = {}
         self._prototypes = set()
         self._products = {p.id: ProductLine(p) for p in catalog.products}
-        # Daily Gold->Bargeld trading (a bootstrap): how much was traded today.
-        self._traded_today = 0
-        self._trade_date = ""
         self._lock = threading.RLock()
 
     def gold(self):
         return self._gold
 
-    # ---------- Gold -> Bargeld trading (capped per day) ----------
-
-    def _refresh_trade_day(self):
-        today = datetime.date.today().isoformat()
-        if self._trade_date != today:
-            self._trade_date = today
-            self._traded_today = 0
-
-    def remaining_trades_today(self):
-        with self._lock:
-            self._refresh_trade_day()
-            return max(0, DAILY_TRADE_CAP - self._traded_today)
+    # ---------- Gold -> Bargeld trading (a bootstrap, unlimited) ----------
 
     def trade_gold_for_bargeld(self, amount):
-        """Trade up to `amount` gold 1:1 into Bargeld, within today's cap and the
-        gold on hand. Returns how much was actually traded."""
+        """Trade up to `amount` gold 1:1 into Bargeld (limited only by the gold on
+        hand). Returns how much was actually traded."""
         with self._lock:
-            self._refresh_trade_day()
-            allowed = min(int(amount), DAILY_TRADE_CAP - self._traded_today, int(self._gold.balance()))
+            allowed = min(int(amount), int(self._gold.balance()))
             if allowed <= 0:
                 return 0
             if not self._gold.try_spend(allowed):
                 return 0
             self._bargeld += allowed
-            self._traded_today += allowed
             return allowed
-
-    def traded_today(self):
-        with self._lock:
-            return self._traded_today
-
-    def trade_date(self):
-        with self._lock:
-            return self._trade_date
-
-    def restore_trades(self, traded_today, trade_date):
-        with self._lock:
-            self._trade_date = str(trade_date) if trade_date else ""
-            self._traded_today = max(0, traded_today)
 
     # ---------- Bargeld ----------
 
@@ -393,6 +430,45 @@ class BusinessState:
         if skill_id is None:
             return True
         return self.skill_level(skill_id) >= min_level
+
+    def skill_unlocked(self, skill_definition):
+        # A skill can only be leveled once its required degree is completed.
+        if skill_definition.unlock_degree is None:
+            return True
+        return self.has_degree(skill_definition.unlock_degree)
+
+    # ---------- degrees ----------
+
+    def degree(self, degree_id):
+        with self._lock:
+            return self._degrees.get(degree_id)
+
+    def degrees(self):
+        with self._lock:
+            return dict(self._degrees)
+
+    def has_degree(self, degree_id):
+        with self._lock:
+            instance = self._degrees.get(degree_id)
+            return instance is not None and instance.is_completed()
+
+    # ---------- BWL side skills: their effects on the business ----------
+
+    def material_multiplier(self):
+        # Finance skill makes materials cheaper (down to 50%).
+        return max(0.5, 1.0 - 0.05 * self.skill_level("finanzen"))
+
+    def sell_multiplier(self):
+        # Marketing skill raises sell prices.
+        return 1.0 + 0.05 * self.skill_level("marketing")
+
+    def cooldown_multiplier(self):
+        # Management skill shortens how long skill level-ups take (down to 50%).
+        return max(0.5, 1.0 - 0.05 * self.skill_level("management"))
+
+    def automation_unlocked(self):
+        # Automations need at least basic business knowledge.
+        return self.skill_level("bwl_grundlagen") >= 1
 
     # ---------- machines ----------
 

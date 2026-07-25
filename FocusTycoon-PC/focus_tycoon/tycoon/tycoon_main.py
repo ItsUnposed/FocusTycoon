@@ -94,6 +94,9 @@ class TycoonPanel:
                 return True
         return self._tycoons[self._active].is_over_interactive(position)
 
+    def handle_scroll(self, wheel_y, position):
+        self._tycoons[self._active].handle_scroll(wheel_y, position)
+
     # ---------- task reward ----------
 
     def trigger_focus_surge(self, reward_gold):

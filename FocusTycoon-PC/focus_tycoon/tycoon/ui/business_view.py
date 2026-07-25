@@ -12,9 +12,10 @@ import pygame
 
 from ...i18n import translate
 from ...util import ui_fonts
-from ..business_simulation import (AutomationBought, GoldTraded, MachineBought,
-                                  MachineBroke, MachineRepaired, ProductSold,
-                                  PrototypeDeveloped, SkillLeveled)
+from ..business_simulation import (AutomationBought, DegreeCompleted, DegreeStarted,
+                                  GoldTraded, MachineBought, MachineBroke,
+                                  MachineRepaired, ProductSold, PrototypeDeveloped,
+                                  SkillLeveled)
 
 SECTION_SKILLS = "skills"
 SECTION_MACHINES = "machines"
@@ -54,15 +55,19 @@ class BusinessView:
         self.section = SECTION_PRODUCTS
         bus.subscribe(self.on_juice_event)
         self._buttons = []  # (rect, kind, payload)
+        # Some sections have more cards than fit, so the list scrolls.
+        self._scroll_y = 0
+        self._max_scroll = 0
+        self._body_rect = pygame.Rect(0, 0, 0, 0)
 
     # ---------- sound feedback ----------
 
     def on_juice_event(self, event):
         if isinstance(event, (ProductSold, GoldTraded)):
             self.sound.play_note(659, 0.09, True)
-        elif isinstance(event, (MachineBought, PrototypeDeveloped, AutomationBought)):
+        elif isinstance(event, (MachineBought, PrototypeDeveloped, AutomationBought, DegreeStarted)):
             self.sound.play_note(523, 0.10, False)
-        elif isinstance(event, SkillLeveled):
+        elif isinstance(event, (SkillLeveled, DegreeCompleted)):
             self.sound.play_note(784, 0.14, True)
         elif isinstance(event, MachineRepaired):
             self.sound.play_note(587, 0.10, False)
@@ -72,14 +77,25 @@ class BusinessView:
     # ---------- input ----------
 
     def handle_click(self, position):
+        # Ignore clicks outside the scrolling body (buttons may be scrolled off).
+        if not self._body_rect.collidepoint(position):
+            return
         for rect, kind, payload in self._buttons:
             if not rect.collidepoint(position):
                 continue
             self._run_action(kind, payload)
             return
 
+    def scroll(self, delta):
+        self._scroll_y = max(0, min(self._max_scroll, self._scroll_y + delta))
+
+    def reset_scroll(self):
+        self._scroll_y = 0
+
     def _run_action(self, kind, payload):
-        if kind == "level_skill":
+        if kind == "study_degree":
+            self.actions.study_degree(self.state, payload, self.bus)
+        elif kind == "level_skill":
             self.actions.level_skill(self.state, payload, self.bus)
         elif kind == "buy_machine":
             self.actions.buy_machine(self.state, payload, self.bus)
@@ -108,22 +124,44 @@ class BusinessView:
 
     def render(self, surface, rect):
         self._buttons = []
-        if self.section == SECTION_SKILLS:
-            self._render_cards(surface, rect, self.catalog.skills, self._draw_skill_card)
-        elif self.section == SECTION_MACHINES:
-            self._render_cards(surface, rect, self.catalog.machines, self._draw_machine_card)
-        elif self.section == SECTION_PROTOTYPES:
-            self._render_cards(surface, rect, self.catalog.prototypes, self._draw_prototype_card)
-        else:
-            self._render_cards(surface, rect, self.catalog.products, self._draw_product_card)
+        self._body_rect = rect
+        entries = self._section_entries()
+        content_height = 12 + len(entries) * (CARD_HEIGHT + CARD_GAP)
+        self._max_scroll = max(0, content_height - rect.height)
+        if self._scroll_y > self._max_scroll:
+            self._scroll_y = self._max_scroll
 
-    def _render_cards(self, surface, rect, definitions, draw):
+        previous_clip = surface.get_clip()
+        surface.set_clip(rect)
         x = rect.x + 16
         width = rect.width - 32
-        y = rect.y + 12
-        for definition in definitions:
-            draw(surface, pygame.Rect(x, y, width, CARD_HEIGHT), definition)
+        y = rect.y + 12 - self._scroll_y
+        for item, draw in entries:
+            draw(surface, pygame.Rect(x, y, width, CARD_HEIGHT), item)
             y += CARD_HEIGHT + CARD_GAP
+        surface.set_clip(previous_clip)
+        self._draw_scrollbar(surface, rect)
+
+    def _section_entries(self):
+        if self.section == SECTION_SKILLS:
+            return ([(d, self._draw_degree_card) for d in self.catalog.degrees]
+                    + [(s, self._draw_skill_card) for s in self.catalog.skills])
+        if self.section == SECTION_MACHINES:
+            return [(m, self._draw_machine_card) for m in self.catalog.machines]
+        if self.section == SECTION_PROTOTYPES:
+            return [(p, self._draw_prototype_card) for p in self.catalog.prototypes]
+        return [(p, self._draw_product_card) for p in self.catalog.products]
+
+    def _draw_scrollbar(self, surface, rect):
+        if self._max_scroll <= 0:
+            return
+        track = pygame.Rect(rect.right - 8, rect.y + 4, 5, rect.height - 8)
+        pygame.draw.rect(surface, (44, 48, 66), track, border_radius=3)
+        visible = rect.height / (rect.height + self._max_scroll)
+        thumb_height = max(24, int(track.height * visible))
+        thumb_y = track.y + int((track.height - thumb_height) * (self._scroll_y / self._max_scroll))
+        pygame.draw.rect(surface, (92, 98, 122), pygame.Rect(track.x, thumb_y, track.width, thumb_height),
+                         border_radius=3)
 
     # ---------- shared drawing ----------
 
@@ -162,14 +200,50 @@ class BusinessView:
 
     # ---------- skills ----------
 
+    def _draw_degree_card(self, surface, rect, definition):
+        instance = self.state.degree(definition.id)
+        self._card(surface, rect, True, definition.accent)
+        self._title(surface, rect, _name("degree_", definition), True)
+        self._info(surface, rect, translate("biz_degree_info"))
+        action = pygame.Rect(rect.right - 12 - 230, rect.centery - 17, 230, 34)
+        if instance.is_completed():
+            self._button(surface, action, translate("biz_degree_done"), (40, 66, 52), SUCCESS, SUCCESS)
+        elif instance.is_studying():
+            bar = pygame.Rect(action.x, action.y + 4, action.width, 26)
+            pygame.draw.rect(surface, TRACK, bar, border_radius=6)
+            pygame.draw.rect(surface, ACCENT,
+                             pygame.Rect(bar.x, bar.y, max(6, int(bar.width * instance.fraction())), bar.height),
+                             border_radius=6)
+            label = translate("biz_degree_studying").format(seconds=int(instance.remaining_seconds()) + 1)
+            text = ui_fonts.base(11, bold=True).render(label, True, (18, 22, 30))
+            surface.blit(text, (bar.centerx - text.get_width() // 2, bar.centery - text.get_height() // 2))
+        elif definition.requires_degree and not self.state.has_degree(definition.requires_degree):
+            required = self.catalog.degree_by_id.get(definition.requires_degree)
+            self._disabled_button(surface, action, translate("biz_needs_degree").format(
+                name=_name("degree_", required) if required else "?"))
+        else:
+            affordable = self.state.gold().balance() >= definition.cost_gold
+            label = translate("biz_degree_study").format(
+                gold=definition.cost_gold, seconds=int(definition.study_seconds))
+            hover = action.collidepoint(pygame.mouse.get_pos())
+            self._button(surface, action, label, CARD_HI if hover else CARD,
+                         GOLD if affordable else DANGER, GOLD if affordable else (240, 205, 205),
+                         "study_degree", instance)
+
     def _draw_skill_card(self, surface, rect, definition):
         instance = self.state.skill(definition.id)
-        self._card(surface, rect, True, definition.accent)
-        self._title(surface, rect, _name("skill_", definition), True)
+        unlocked = self.state.skill_unlocked(definition)
+        self._card(surface, rect, unlocked, definition.accent)
+        self._title(surface, rect, _name("skill_", definition), unlocked)
         self._info(surface, rect, translate("biz_skill_level").format(
             level=instance.level(), max=definition.max_level))
 
         action = pygame.Rect(rect.right - 12 - 200, rect.centery - 17, 200, 34)
+        if not unlocked:
+            degree = self.catalog.degree_by_id.get(definition.unlock_degree)
+            self._disabled_button(surface, action, translate("biz_needs_degree").format(
+                name=_name("degree_", degree) if degree else "?"))
+            return
         if instance.is_leveling():
             # A progress bar with the remaining time.
             bar = pygame.Rect(action.x, action.y + 4, action.width, 26)
@@ -184,8 +258,8 @@ class BusinessView:
             self._disabled_button(surface, action, translate("biz_max"))
         else:
             affordable = self.state.gold().balance() >= instance.cost_gold()
-            label = translate("biz_skill_up").format(gold=instance.cost_gold(),
-                                                     seconds=int(instance.cooldown_seconds()))
+            seconds = int(instance.cooldown_seconds() * self.state.cooldown_multiplier())
+            label = translate("biz_skill_up").format(gold=instance.cost_gold(), seconds=seconds)
             hover = action.collidepoint(pygame.mouse.get_pos())
             self._button(surface, action, label, CARD_HI if hover else CARD,
                          GOLD if affordable else DANGER, GOLD if affordable else (240, 205, 205),
@@ -270,9 +344,11 @@ class BusinessView:
                 name=_name("prototype_", proto) if proto else "?"))
             return
 
+        # Material and price include the finance / marketing (BWL) bonuses.
+        material = definition.material_cost_bargeld * self.state.material_multiplier()
+        price = definition.sell_price_bargeld * self.state.sell_multiplier()
         info = translate("biz_product_info").format(
-            material=int(definition.material_cost_bargeld), price=int(definition.sell_price_bargeld),
-            stock=line.stock())
+            material=int(round(material)), price=int(round(price)), stock=line.stock())
         self._info(surface, rect, info)
 
         # Production progress bar under the info line.
@@ -293,7 +369,7 @@ class BusinessView:
 
         machine = self.state.machine(definition.required_machine)
         can_produce = (machine is not None and not machine.is_broken() and not line.is_producing()
-                       and self.state.bargeld() >= definition.material_cost_bargeld)
+                       and self.state.bargeld() >= material)
         if machine is None:
             self._disabled_button(surface, pr, translate("biz_no_machine"))
         elif can_produce:
@@ -303,7 +379,7 @@ class BusinessView:
 
         if line.stock() > 0:
             self._action_button(surface, sr, translate("biz_sell").format(
-                amount=int(line.stock() * definition.sell_price_bargeld)), "sell", definition, True)
+                amount=int(round(line.stock() * price))), "sell", definition, True)
         else:
             self._disabled_button(surface, sr, translate("biz_sell_empty"))
 
@@ -315,6 +391,9 @@ class BusinessView:
     def _auto_button(self, surface, rect, definition, on, kind, cost, label_on):
         if on:
             self._button(surface, rect, label_on, (40, 66, 52), SUCCESS, SUCCESS)
+        elif not self.state.automation_unlocked():
+            # Automations need the Business Basics (BWL) skill first.
+            self._disabled_button(surface, rect, translate("biz_needs_bwl"))
         else:
             affordable = self.state.bargeld() >= cost
             self._action_button(surface, rect, translate("biz_automate").format(cost=int(cost)),

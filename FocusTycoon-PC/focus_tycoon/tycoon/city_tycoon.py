@@ -127,6 +127,9 @@ class CityTycoon:
         grid_x, grid_y = self._view.screen_to_grid(map_position[0], map_position[1])
         return self.state.in_bounds(grid_x, grid_y)
 
+    def handle_scroll(self, wheel_y, position):
+        pass  # the city map does not scroll
+
     # ---------- task reward / lifecycle ----------
 
     def on_task_reward(self, reward_gold):
