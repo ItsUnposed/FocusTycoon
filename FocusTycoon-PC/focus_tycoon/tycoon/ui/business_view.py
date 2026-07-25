@@ -55,10 +55,15 @@ class BusinessView:
         self.section = SECTION_PRODUCTS
         bus.subscribe(self.on_juice_event)
         self._buttons = []  # (rect, kind, payload)
-        # Some sections have more cards than fit, so the list scrolls.
+        # Some sections have more cards than fit, so the list scrolls (mouse
+        # wheel, dragging the scrollbar thumb, or the keyboard).
         self._scroll_y = 0
         self._max_scroll = 0
         self._body_rect = pygame.Rect(0, 0, 0, 0)
+        self._track_rect = pygame.Rect(0, 0, 0, 0)
+        self._thumb_rect = pygame.Rect(0, 0, 0, 0)
+        self._dragging = False
+        self._drag_offset = 0
 
     # ---------- sound feedback ----------
 
@@ -80,6 +85,11 @@ class BusinessView:
         # Ignore clicks outside the scrolling body (buttons may be scrolled off).
         if not self._body_rect.collidepoint(position):
             return
+        # Grabbing the scrollbar thumb starts a drag.
+        if self._max_scroll > 0 and self._thumb_rect.collidepoint(position):
+            self._dragging = True
+            self._drag_offset = position[1] - self._thumb_rect.y
+            return
         for rect, kind, payload in self._buttons:
             if not rect.collidepoint(position):
                 continue
@@ -91,6 +101,31 @@ class BusinessView:
 
     def reset_scroll(self):
         self._scroll_y = 0
+        self._dragging = False
+
+    def handle_drag(self, position):
+        if not self._dragging:
+            return
+        usable = self._track_rect.height - self._thumb_rect.height
+        if usable <= 0:
+            return
+        relative = (position[1] - self._drag_offset) - self._track_rect.y
+        fraction = max(0.0, min(1.0, relative / usable))
+        self._scroll_y = int(fraction * self._max_scroll)
+
+    def stop_drag(self):
+        self._dragging = False
+
+    def scroll_key(self, key):
+        page = max(40, self._body_rect.height - 40)
+        if key == pygame.K_UP:
+            self.scroll(-40)
+        elif key == pygame.K_DOWN:
+            self.scroll(40)
+        elif key == pygame.K_PAGEUP:
+            self.scroll(-page)
+        elif key == pygame.K_PAGEDOWN:
+            self.scroll(page)
 
     def _run_action(self, kind, payload):
         if kind == "study_degree":
@@ -154,14 +189,18 @@ class BusinessView:
 
     def _draw_scrollbar(self, surface, rect):
         if self._max_scroll <= 0:
+            self._track_rect = pygame.Rect(0, 0, 0, 0)
+            self._thumb_rect = pygame.Rect(0, 0, 0, 0)
             return
-        track = pygame.Rect(rect.right - 8, rect.y + 4, 5, rect.height - 8)
-        pygame.draw.rect(surface, (44, 48, 66), track, border_radius=3)
+        track = pygame.Rect(rect.right - 12, rect.y + 4, 8, rect.height - 8)
+        self._track_rect = track
+        pygame.draw.rect(surface, (44, 48, 66), track, border_radius=4)
         visible = rect.height / (rect.height + self._max_scroll)
-        thumb_height = max(24, int(track.height * visible))
+        thumb_height = max(28, int(track.height * visible))
         thumb_y = track.y + int((track.height - thumb_height) * (self._scroll_y / self._max_scroll))
-        pygame.draw.rect(surface, (92, 98, 122), pygame.Rect(track.x, thumb_y, track.width, thumb_height),
-                         border_radius=3)
+        self._thumb_rect = pygame.Rect(track.x, thumb_y, track.width, thumb_height)
+        color = ACCENT if self._dragging else (100, 106, 132)
+        pygame.draw.rect(surface, color, self._thumb_rect, border_radius=4)
 
     # ---------- shared drawing ----------
 

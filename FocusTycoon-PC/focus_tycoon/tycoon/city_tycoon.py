@@ -130,6 +130,15 @@ class CityTycoon:
     def handle_scroll(self, wheel_y, position):
         pass  # the city map does not scroll
 
+    def handle_drag(self, position):
+        pass
+
+    def stop_drag(self):
+        pass
+
+    def handle_scroll_key(self, key):
+        pass
+
     # ---------- task reward / lifecycle ----------
 
     def on_task_reward(self, reward_gold):

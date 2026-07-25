@@ -251,8 +251,12 @@ class GameWindow:
                 self.tycoon.handle_scroll(event.y, pygame.mouse.get_pos())
             elif event.type == pygame.MOUSEMOTION and self.scroll_dragging:
                 self._drag_scrollbar(event.pos[1])
+            elif event.type == pygame.MOUSEMOTION and self.page == PAGE_TYCOON:
+                # Dragging the tycoon's own scrollbar thumb (the business list).
+                self.tycoon.handle_drag(event.pos)
             elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
                 self.scroll_dragging = False  # released the mouse, stop dragging the thumb
+                self.tycoon.stop_drag()
             elif self.page == PAGE_TASKS:
                 self.title_input.handle_event(event)
                 self.description_input.handle_event(event)
@@ -338,6 +342,8 @@ class GameWindow:
             pass
         elif self.page == PAGE_TASKS:
             self._scroll_tasks_with_key(key)
+        elif self.page == PAGE_TYCOON:
+            self.tycoon.handle_scroll_key(key)
 
     def _scroll_tasks_with_key(self, key):
         # The tasks list keeps its own scroll position (scroll_y / scroll_max)

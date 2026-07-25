@@ -97,6 +97,15 @@ class TycoonPanel:
     def handle_scroll(self, wheel_y, position):
         self._tycoons[self._active].handle_scroll(wheel_y, position)
 
+    def handle_drag(self, position):
+        self._tycoons[self._active].handle_drag(position)
+
+    def stop_drag(self):
+        self._tycoons[self._active].stop_drag()
+
+    def handle_scroll_key(self, key):
+        self._tycoons[self._active].handle_scroll_key(key)
+
     # ---------- task reward ----------
 
     def trigger_focus_surge(self, reward_gold):

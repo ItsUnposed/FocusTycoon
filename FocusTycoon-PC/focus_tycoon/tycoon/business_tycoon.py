@@ -139,8 +139,17 @@ class BusinessTycoon:
         self._view.handle_click(position)
 
     def handle_scroll(self, wheel_y, position):
-        if self._body_rect.collidepoint(position):
-            self._view.scroll(-wheel_y * 40)
+        # The wheel scrolls the list from anywhere on the business page.
+        self._view.scroll(-wheel_y * 40)
+
+    def handle_drag(self, position):
+        self._view.handle_drag(position)
+
+    def stop_drag(self):
+        self._view.stop_drag()
+
+    def handle_scroll_key(self, key):
+        self._view.scroll_key(key)
 
     def is_over_interactive(self, position):
         if self._trade_button_rect.collidepoint(position):
