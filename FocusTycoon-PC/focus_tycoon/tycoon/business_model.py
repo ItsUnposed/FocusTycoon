@@ -36,7 +36,8 @@ def _grown(base, growth, level):
 
 class SkillDefinition:
     def __init__(self, skill_id, display_name, base_cost_gold, cost_growth,
-                 base_cooldown_seconds, cooldown_growth, max_level, unlock_degree, accent):
+                 base_cooldown_seconds, cooldown_growth, max_level, unlock_degree, accent,
+                 group="basics"):
         self.id = skill_id
         self.display_name = display_name
         self.base_cost_gold = base_cost_gold
@@ -48,6 +49,9 @@ class SkillDefinition:
         # (None = available from the start).
         self.unlock_degree = unlock_degree
         self.accent = accent
+        # Which themed group this skill is shown under in the Education section
+        # (basics / bachelor / master / bwl).
+        self.group = group
 
 
 class SkillInstance:

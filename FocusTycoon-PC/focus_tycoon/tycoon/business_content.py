@@ -43,22 +43,22 @@ def _degrees():
 def _skills():
     return [
         # --- electrical engineering basics (no degree needed) ---
-        SkillDefinition("grundlagen", "Basics", 60, 1.8, 20, 1.5, 5, None, (120, 190, 150)),
-        SkillDefinition("schaltungstechnik", "Circuit Design", 120, 1.8, 30, 1.5, 5, None, (120, 180, 170)),
-        SkillDefinition("messtechnik", "Measurement", 180, 1.8, 35, 1.5, 5, None, (120, 170, 190)),
+        SkillDefinition("grundlagen", "Basics", 60, 1.8, 20, 1.5, 5, None, (120, 190, 150), group="basics"),
+        SkillDefinition("schaltungstechnik", "Circuit Design", 120, 1.8, 30, 1.5, 5, None, (120, 180, 170), group="basics"),
+        SkillDefinition("messtechnik", "Measurement", 180, 1.8, 35, 1.5, 5, None, (120, 170, 190), group="basics"),
         # --- unlocked by the Bachelor ---
-        SkillDefinition("leistungselektronik", "Power Electronics", 300, 1.9, 60, 1.5, 5, "bachelor", (200, 160, 100)),
-        SkillDefinition("mikroelektronik", "Microelectronics", 400, 1.9, 70, 1.5, 5, "bachelor", (160, 150, 220)),
-        SkillDefinition("fertigung", "Manufacturing", 500, 1.9, 80, 1.5, 5, "bachelor", (170, 150, 130)),
+        SkillDefinition("leistungselektronik", "Power Electronics", 300, 1.9, 60, 1.5, 5, "bachelor", (200, 160, 100), group="bachelor"),
+        SkillDefinition("mikroelektronik", "Microelectronics", 400, 1.9, 70, 1.5, 5, "bachelor", (160, 150, 220), group="bachelor"),
+        SkillDefinition("fertigung", "Manufacturing", 500, 1.9, 80, 1.5, 5, "bachelor", (170, 150, 130), group="bachelor"),
         # --- unlocked by the Master ---
-        SkillDefinition("regelungstechnik", "Control Systems", 800, 2.0, 100, 1.5, 5, "master", (150, 180, 220)),
-        SkillDefinition("halbleitertechnik", "Semiconductors", 1000, 2.0, 120, 1.5, 5, "master", (200, 170, 120)),
-        SkillDefinition("automatisierung", "Automation", 900, 2.0, 110, 1.5, 5, "master", (150, 200, 180)),
+        SkillDefinition("regelungstechnik", "Control Systems", 800, 2.0, 100, 1.5, 5, "master", (150, 180, 220), group="master"),
+        SkillDefinition("halbleitertechnik", "Semiconductors", 1000, 2.0, 120, 1.5, 5, "master", (200, 170, 120), group="master"),
+        SkillDefinition("automatisierung", "Automation", 900, 2.0, 110, 1.5, 5, "master", (150, 200, 180), group="master"),
         # --- BWL, on the side (no degree needed) ---
-        SkillDefinition("bwl_grundlagen", "Business Basics", 200, 1.7, 40, 1.4, 5, None, (210, 150, 220)),
-        SkillDefinition("marketing", "Marketing", 300, 1.7, 50, 1.4, 5, None, (220, 150, 190)),
-        SkillDefinition("finanzen", "Finance", 300, 1.7, 50, 1.4, 5, None, (150, 210, 170)),
-        SkillDefinition("management", "Management", 500, 1.8, 70, 1.4, 5, None, (200, 190, 150)),
+        SkillDefinition("bwl_grundlagen", "Business Basics", 200, 1.7, 40, 1.4, 5, None, (210, 150, 220), group="bwl"),
+        SkillDefinition("marketing", "Marketing", 300, 1.7, 50, 1.4, 5, None, (220, 150, 190), group="bwl"),
+        SkillDefinition("finanzen", "Finance", 300, 1.7, 50, 1.4, 5, None, (150, 210, 170), group="bwl"),
+        SkillDefinition("management", "Management", 500, 1.8, 70, 1.4, 5, None, (200, 190, 150), group="bwl"),
     ]
 
 

@@ -37,6 +37,17 @@ TRACK = (44, 48, 66)
 
 CARD_HEIGHT = 82
 CARD_GAP = 8
+# A collapsible group header in the Education section is a bit shorter than a card.
+GROUP_HEADER_HEIGHT = 54
+
+# The themed groups the Education skills are sorted into, and their titles. The
+# order here is the order the groups appear on screen.
+_SKILL_GROUP_TITLES = {
+    "basics": "biz_group_basics",
+    "bachelor": "biz_group_bachelor",
+    "master": "biz_group_master",
+    "bwl": "biz_group_bwl",
+}
 
 
 def _name(prefix, definition):
@@ -64,6 +75,9 @@ class BusinessView:
         self._thumb_rect = pygame.Rect(0, 0, 0, 0)
         self._dragging = False
         self._drag_offset = 0
+        # Which Education groups are currently expanded (showing their skills).
+        # The basics group starts open so the feature is easy to discover.
+        self._expanded_groups = {"basics"}
 
     # ---------- sound feedback ----------
 
@@ -128,6 +142,9 @@ class BusinessView:
             self.scroll(page)
 
     def _run_action(self, kind, payload):
+        if kind == "toggle_group":
+            self._toggle_group(payload)
+            return
         if kind == "study_degree":
             self.actions.study_degree(self.state, payload, self.bus)
         elif kind == "level_skill":
@@ -160,8 +177,12 @@ class BusinessView:
     def render(self, surface, rect):
         self._buttons = []
         self._body_rect = rect
-        entries = self._section_entries()
-        content_height = 12 + len(entries) * (CARD_HEIGHT + CARD_GAP)
+        # Every row carries its own height, so a section can mix full cards with
+        # shorter group headers (the Education section does this).
+        rows = self._section_rows()
+        content_height = 12
+        for height, draw, item in rows:
+            content_height += height + CARD_GAP
         self._max_scroll = max(0, content_height - rect.height)
         if self._scroll_y > self._max_scroll:
             self._scroll_y = self._max_scroll
@@ -171,21 +192,48 @@ class BusinessView:
         x = rect.x + 16
         width = rect.width - 32
         y = rect.y + 12 - self._scroll_y
-        for item, draw in entries:
-            draw(surface, pygame.Rect(x, y, width, CARD_HEIGHT), item)
-            y += CARD_HEIGHT + CARD_GAP
+        for height, draw, item in rows:
+            draw(surface, pygame.Rect(x, y, width, height), item)
+            y += height + CARD_GAP
         surface.set_clip(previous_clip)
         self._draw_scrollbar(surface, rect)
 
-    def _section_entries(self):
+    def _section_rows(self):
+        # Each row is (height, draw_function, item). draw_function is called as
+        # draw_function(surface, rect, item).
         if self.section == SECTION_SKILLS:
-            return ([(d, self._draw_degree_card) for d in self.catalog.degrees]
-                    + [(s, self._draw_skill_card) for s in self.catalog.skills])
+            return self._skill_rows()
         if self.section == SECTION_MACHINES:
-            return [(m, self._draw_machine_card) for m in self.catalog.machines]
+            return [(CARD_HEIGHT, self._draw_machine_card, m) for m in self.catalog.machines]
         if self.section == SECTION_PROTOTYPES:
-            return [(p, self._draw_prototype_card) for p in self.catalog.prototypes]
-        return [(p, self._draw_product_card) for p in self.catalog.products]
+            return [(CARD_HEIGHT, self._draw_prototype_card, p) for p in self.catalog.prototypes]
+        return [(CARD_HEIGHT, self._draw_product_card, p) for p in self.catalog.products]
+
+    def _skill_rows(self):
+        # The two degrees stay as their own cards at the very top.
+        rows = []
+        for degree in self.catalog.degrees:
+            rows.append((CARD_HEIGHT, self._draw_degree_card, degree))
+        # Then the skills, sorted into themed groups. Each group is a header row;
+        # its skill cards only follow when the group is expanded.
+        for group_id, skills in self._skill_groups():
+            rows.append((GROUP_HEADER_HEIGHT, self._draw_group_header, group_id))
+            if group_id in self._expanded_groups:
+                for skill in skills:
+                    rows.append((CARD_HEIGHT, self._draw_skill_card, skill))
+        return rows
+
+    def _skill_groups(self):
+        # Build an ordered list of (group_id, [skills]) from the catalog, keeping
+        # the order in which the groups first appear.
+        order = []
+        members = {}
+        for skill in self.catalog.skills:
+            if skill.group not in members:
+                members[skill.group] = []
+                order.append(skill.group)
+            members[skill.group].append(skill)
+        return [(group_id, members[group_id]) for group_id in order]
 
     def _draw_scrollbar(self, surface, rect):
         if self._max_scroll <= 0:
@@ -238,6 +286,66 @@ class BusinessView:
         self._button(surface, rect, label, DISABLED, None, MUTED, size=size)
 
     # ---------- skills ----------
+
+    def _toggle_group(self, group_id):
+        # Clicking a group header opens it if closed, or closes it if open.
+        if group_id in self._expanded_groups:
+            self._expanded_groups.discard(group_id)
+        else:
+            self._expanded_groups.add(group_id)
+
+    def _skills_in_group(self, group_id):
+        result = []
+        for skill in self.catalog.skills:
+            if skill.group == group_id:
+                result.append(skill)
+        return result
+
+    def _draw_group_header(self, surface, rect, group_id):
+        # The whole rectangle is one big button that toggles the group, so draw
+        # it like a card and light it up on hover.
+        hover = rect.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.rect(surface, CARD_HI if hover else CARD, rect, border_radius=12)
+        pygame.draw.rect(surface, (60, 64, 88), rect, width=1, border_radius=12)
+
+        # Title of the theme.
+        title = translate(_SKILL_GROUP_TITLES.get(group_id, group_id))
+        surface.blit(ui_fonts.base(15, bold=True).render(title, True, INK), (rect.x + 16, rect.y + 8))
+
+        # A small summary: how many skills and the combined level of the group.
+        skills = self._skills_in_group(group_id)
+        total_level = 0
+        max_level = 0
+        for skill in skills:
+            total_level += self.state.skill(skill.id).level()
+            max_level += skill.max_level
+        summary = translate("biz_group_summary").format(
+            count=len(skills), level=total_level, max=max_level)
+        surface.blit(ui_fonts.base(12).render(summary, True, MUTED), (rect.x + 16, rect.y + 30))
+
+        # The little arrow: pointing down when closed (click to open downward),
+        # pointing up when the group is already open.
+        expanded = group_id in self._expanded_groups
+        self._draw_chevron(surface, rect, expanded)
+
+        # Register the whole header as the clickable toggle.
+        self._buttons.append((rect, "toggle_group", group_id))
+
+    def _draw_chevron(self, surface, rect, expanded):
+        center_x = rect.right - 26
+        center_y = rect.centery
+        size = 7
+        if expanded:
+            # Arrow pointing up.
+            points = [(center_x - size, center_y + size // 2),
+                      (center_x + size, center_y + size // 2),
+                      (center_x, center_y - size // 2 - 1)]
+        else:
+            # Arrow pointing down.
+            points = [(center_x - size, center_y - size // 2),
+                      (center_x + size, center_y - size // 2),
+                      (center_x, center_y + size // 2 + 1)]
+        pygame.draw.polygon(surface, INK, points)
 
     def _draw_degree_card(self, surface, rect, definition):
         instance = self.state.degree(definition.id)
