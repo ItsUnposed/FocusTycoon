@@ -12,8 +12,8 @@ import pygame
 
 from ...i18n import translate
 from ...util import ui_fonts
-from ..business_simulation import (AutomationBought, DegreeCompleted, DegreeStarted,
-                                  GoldTraded, MachineBought, MachineBroke,
+from ..business_simulation import (AutomationBought, AutomationToggled, DegreeCompleted,
+                                  DegreeStarted, GoldTraded, MachineBought, MachineBroke,
                                   MachineRepaired, ProductSold, PrototypeDeveloped,
                                   SkillLeveled)
 
@@ -30,6 +30,7 @@ CARD = (34, 37, 52)
 CARD_HI = (46, 50, 68)
 ACCENT = (122, 196, 255)
 SUCCESS = (120, 214, 150)
+ORANGE = (232, 158, 78)
 DANGER = (226, 130, 130)
 BROKEN = (232, 120, 110)
 DISABLED = (58, 62, 82)
@@ -88,6 +89,9 @@ class BusinessView:
             self.sound.play_note(523, 0.10, False)
         elif isinstance(event, (SkillLeveled, DegreeCompleted)):
             self.sound.play_note(784, 0.14, True)
+        elif isinstance(event, AutomationToggled):
+            # A brighter note for switching on, a lower one for switching off.
+            self.sound.play_note(659 if event.on else 330, 0.08, event.on)
         elif isinstance(event, MachineRepaired):
             self.sound.play_note(587, 0.10, False)
         elif isinstance(event, MachineBroke):
@@ -165,6 +169,10 @@ class BusinessView:
             self.actions.buy_auto_produce(self.state, payload, self.bus)
         elif kind == "auto_sell":
             self.actions.buy_auto_sell(self.state, payload, self.bus)
+        elif kind == "toggle_auto_produce":
+            self.actions.toggle_auto_produce(self.state, payload, self.bus)
+        elif kind == "toggle_auto_sell":
+            self.actions.toggle_auto_sell(self.state, payload, self.bus)
 
     def is_over(self, position):
         for rect, _, _ in self._buttons:
@@ -427,9 +435,13 @@ class BusinessView:
                 self._info(surface, rect, translate("biz_machine_level").format(level=instance.level()))
             if instance.is_broken():
                 action = pygame.Rect(rect.right - 12 - 200, rect.centery - 17, 200, 34)
-                affordable = self.state.bargeld() >= definition.repair_cost_bargeld
-                self._action_button(surface, action, translate("biz_repair").format(
-                    cost=int(definition.repair_cost_bargeld)), "repair_machine", instance, affordable, size=12)
+                # Repairs cost Gold, so colour the button gold and check the gold balance.
+                affordable = self.state.gold().balance() >= definition.repair_cost_gold
+                hover = action.collidepoint(pygame.mouse.get_pos())
+                self._button(surface, action, translate("biz_repair").format(
+                    cost=int(definition.repair_cost_gold)), CARD_HI if hover else CARD,
+                    GOLD if affordable else DANGER, GOLD if affordable else (240, 205, 205),
+                    "repair_machine", instance, size=12)
             else:
                 action = pygame.Rect(rect.right - 12 - 200, rect.centery - 17, 200, 34)
                 if instance.can_upgrade():
@@ -530,21 +542,50 @@ class BusinessView:
         else:
             self._disabled_button(surface, sr, translate("biz_sell_empty"))
 
-        self._auto_button(surface, apr, definition, line.auto_produce(), "auto_produce",
-                          definition.auto_produce_cost, translate("biz_auto_produce"))
-        self._auto_button(surface, asr, definition, line.auto_sell(), "auto_sell",
-                          definition.auto_sell_cost, translate("biz_auto_sell"))
+        self._auto_button(surface, apr, definition, line, "produce")
+        self._auto_button(surface, asr, definition, line, "sell")
 
-    def _auto_button(self, surface, rect, definition, on, kind, cost, label_on):
-        if on:
-            self._button(surface, rect, label_on, (40, 66, 52), SUCCESS, SUCCESS)
+    def _auto_button(self, surface, rect, definition, line, which):
+        # "which" is "produce" or "sell"; pick that automation's data and labels.
+        if which == "produce":
+            bought = line.auto_produce_bought()
+            active = line.auto_produce()
+            cost = definition.auto_produce_cost
+            buy_kind = "auto_produce"
+            toggle_kind = "toggle_auto_produce"
+            label_on = translate("biz_auto_produce")
+            label_off = translate("biz_auto_produce_off")
+        else:
+            bought = line.auto_sell_bought()
+            active = line.auto_sell()
+            cost = definition.auto_sell_cost
+            buy_kind = "auto_sell"
+            toggle_kind = "toggle_auto_sell"
+            label_on = translate("biz_auto_sell")
+            label_off = translate("biz_auto_sell_off")
+
+        if bought:
+            # Already bought: a clickable on/off toggle (green when on, orange off).
+            self._toggle_button(surface, rect, label_on if active else label_off,
+                                toggle_kind, definition, active)
         elif not self.state.automation_unlocked():
             # Automations need the Business Basics (BWL) skill first.
             self._disabled_button(surface, rect, translate("biz_needs_bwl"))
         else:
             affordable = self.state.bargeld() >= cost
             self._action_button(surface, rect, translate("biz_automate").format(cost=int(cost)),
-                                kind, definition, affordable)
+                                buy_kind, definition, affordable)
+
+    def _toggle_button(self, surface, rect, label, kind, payload, on):
+        # Green when the automation is on, orange when it is off. The whole button
+        # stays clickable so the player can flip it back and forth.
+        accent = SUCCESS if on else ORANGE
+        base_fill = (40, 66, 52) if on else (66, 52, 34)
+        hover = rect.collidepoint(pygame.mouse.get_pos())
+        if hover:
+            # Lighten the fill a little on hover for feedback.
+            base_fill = (base_fill[0] + 12, base_fill[1] + 12, base_fill[2] + 12)
+        self._button(surface, rect, label, base_fill, accent, accent, kind, payload)
 
 
 def _dim(color):

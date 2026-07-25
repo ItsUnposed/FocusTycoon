@@ -88,6 +88,12 @@ class AutomationBought:
         self.product_id = product_id
 
 
+class AutomationToggled:
+    def __init__(self, product_id, on):
+        self.product_id = product_id
+        self.on = on
+
+
 class GoldTraded:
     def __init__(self, amount):
         self.amount = amount
@@ -227,7 +233,8 @@ class BusinessActions:
     def repair_machine(self, state, instance, bus: JuiceEventBus):
         if not instance.is_broken():
             return False
-        if not state.try_spend_bargeld(instance.definition.repair_cost_bargeld):
+        # Repairs are paid with Gold, not Bargeld.
+        if not state.gold().try_spend(instance.definition.repair_cost_gold):
             return False
         instance.set_broken(False)
         bus.publish(MachineRepaired(instance.definition.id))
@@ -296,4 +303,21 @@ class BusinessActions:
             return False
         line.enable_auto_sell()
         bus.publish(AutomationBought(definition.id))
+        return True
+
+    def toggle_auto_produce(self, state, definition, bus: JuiceEventBus):
+        # Flip the auto-produce switch on or off (only if it was bought).
+        line = state.product_line(definition.id)
+        if line is None or not line.auto_produce_bought():
+            return False
+        line.toggle_auto_produce()
+        bus.publish(AutomationToggled(definition.id, line.auto_produce()))
+        return True
+
+    def toggle_auto_sell(self, state, definition, bus: JuiceEventBus):
+        line = state.product_line(definition.id)
+        if line is None or not line.auto_sell_bought():
+            return False
+        line.toggle_auto_sell()
+        bus.publish(AutomationToggled(definition.id, line.auto_sell()))
         return True

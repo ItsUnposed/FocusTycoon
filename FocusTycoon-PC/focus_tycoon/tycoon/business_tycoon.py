@@ -178,9 +178,11 @@ class BusinessTycoon:
                              "broken": instance.is_broken()})
         products = []
         for pid, line in self.state.product_lines().items():
-            if line.stock() > 0 or line.auto_produce() or line.auto_sell():
+            if line.stock() > 0 or line.auto_produce_bought() or line.auto_sell_bought():
                 products.append({"id": pid, "stock": line.stock(),
-                                 "auto_produce": line.auto_produce(), "auto_sell": line.auto_sell()})
+                                 "auto_produce": line.auto_produce(), "auto_sell": line.auto_sell(),
+                                 "auto_produce_bought": line.auto_produce_bought(),
+                                 "auto_sell_bought": line.auto_sell_bought()})
         degrees = [did for did, inst in self.state.degrees().items() if inst.is_completed()]
         return {
             "bargeld": round(self.state.bargeld(), 2),
@@ -228,8 +230,20 @@ class BusinessTycoon:
                 if line is None:
                     continue
                 stock = item.get("stock")
+                # "bought" is optional: older saves without it fall back to the
+                # on/off value (None tells restore to do that).
                 line.restore(stock if _is_int(stock) else 0,
-                             item.get("auto_produce") is True, item.get("auto_sell") is True)
+                             item.get("auto_produce") is True, item.get("auto_sell") is True,
+                             _optional_bool(item, "auto_produce_bought"),
+                             _optional_bool(item, "auto_sell_bought"))
+
+
+def _optional_bool(item, key):
+    # Return True/False if the key is present, or None if it is missing entirely
+    # (so an old save can fall back to a sensible default).
+    if key not in item:
+        return None
+    return item.get(key) is True
 
 
 def _is_int(value):

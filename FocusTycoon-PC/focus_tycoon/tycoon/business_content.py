@@ -63,7 +63,7 @@ def _skills():
 
 
 # Machines: (id, name, buy bargeld, upgrade bargeld, upgrade growth, max level,
-# required skill id, required skill level, break chance, repair bargeld, accent).
+# required skill id, required skill level, break chance, repair gold, accent).
 def _machines():
     return [
         MachineDefinition("loetstation", "Soldering Station", 120, 80, 1.6, 5,

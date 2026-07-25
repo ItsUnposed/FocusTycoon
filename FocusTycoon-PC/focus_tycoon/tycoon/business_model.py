@@ -191,7 +191,7 @@ class DegreeInstance:
 class MachineDefinition:
     def __init__(self, machine_id, display_name, buy_cost_bargeld,
                  base_upgrade_cost_bargeld, upgrade_growth, max_level,
-                 required_skill, required_skill_level, break_chance, repair_cost_bargeld, accent):
+                 required_skill, required_skill_level, break_chance, repair_cost_gold, accent):
         self.id = machine_id
         self.display_name = display_name
         self.buy_cost_bargeld = buy_cost_bargeld
@@ -203,7 +203,8 @@ class MachineDefinition:
         self.required_skill_level = required_skill_level
         # Base chance the machine breaks after a production run (reduced by level).
         self.break_chance = break_chance
-        self.repair_cost_bargeld = repair_cost_bargeld
+        # Repairing a broken machine is paid with Gold (not Bargeld).
+        self.repair_cost_gold = repair_cost_gold
         self.accent = accent
 
 
@@ -293,7 +294,11 @@ class ProductLine:
         self._stock = 0
         self._progress = 0.0
         self._producing = False
+        # "bought" means the automation was paid for; "active" is the on/off
+        # toggle the player can flip once it is bought.
+        self._auto_produce_bought = False
         self._auto_produce = False
+        self._auto_sell_bought = False
         self._auto_sell = False
         self._lock = threading.RLock()
 
@@ -313,9 +318,17 @@ class ProductLine:
         with self._lock:
             return self._auto_produce
 
+    def auto_produce_bought(self):
+        with self._lock:
+            return self._auto_produce_bought
+
     def auto_sell(self):
         with self._lock:
             return self._auto_sell
+
+    def auto_sell_bought(self):
+        with self._lock:
+            return self._auto_sell_bought
 
     def start_run(self):
         with self._lock:
@@ -348,18 +361,43 @@ class ProductLine:
             return units
 
     def enable_auto_produce(self):
+        # Buying the automation turns it on right away.
         with self._lock:
+            self._auto_produce_bought = True
             self._auto_produce = True
 
     def enable_auto_sell(self):
         with self._lock:
+            self._auto_sell_bought = True
             self._auto_sell = True
 
-    def restore(self, stock, auto_produce, auto_sell):
+    def toggle_auto_produce(self):
+        # Flip the on/off switch; only works once the automation is bought.
+        with self._lock:
+            if self._auto_produce_bought:
+                self._auto_produce = not self._auto_produce
+
+    def toggle_auto_sell(self):
+        with self._lock:
+            if self._auto_sell_bought:
+                self._auto_sell = not self._auto_sell
+
+    def restore(self, stock, auto_produce, auto_sell,
+                auto_produce_bought=None, auto_sell_bought=None):
         with self._lock:
             self._stock = max(0, stock)
             self._auto_produce = bool(auto_produce)
             self._auto_sell = bool(auto_sell)
+            # Older saves did not store "bought" separately: back then an
+            # automation that was on had simply been bought, so fall back to that.
+            if auto_produce_bought is None:
+                self._auto_produce_bought = bool(auto_produce)
+            else:
+                self._auto_produce_bought = bool(auto_produce_bought)
+            if auto_sell_bought is None:
+                self._auto_sell_bought = bool(auto_sell)
+            else:
+                self._auto_sell_bought = bool(auto_sell_bought)
 
 
 # ---------------------------------------------------------------- the state
