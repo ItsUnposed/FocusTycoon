@@ -35,7 +35,11 @@ STAGE_HEIGHT = 78
 DONE_CARD_HEIGHT = 64
 
 PAGE_TASKS = "tasks"
-PAGE_TYCOON = "tycoon"
+PAGE_BUSINESS = "business"
+PAGE_CITY = "city"
+# Business and Stadt are now their own top-navbar entries; both are drawn by the
+# shared TycoonPanel, which just switches to the matching tycoon.
+TYCOON_PAGES = (PAGE_BUSINESS, PAGE_CITY)
 
 # The four choices of the split selector map to these levels.
 SPLIT_LEVELS = [SPLIT_NONE, SPLIT_FINE, SPLIT_MEDIUM, SPLIT_COARSE]
@@ -114,7 +118,8 @@ class GameWindow:
         # Click areas rebuilt every frame.
         self.frame_buttons = []
         self.nav_tasks_rect = pygame.Rect(0, 0, 0, 0)
-        self.nav_tycoon_rect = pygame.Rect(0, 0, 0, 0)
+        self.nav_business_rect = pygame.Rect(0, 0, 0, 0)
+        self.nav_city_rect = pygame.Rect(0, 0, 0, 0)
         self.tutorial_button_rect = pygame.Rect(0, 0, 0, 0)
         # Real position is set every frame in _draw_navbar; start empty so an
         # early click cannot collide with it before the first draw.
@@ -245,13 +250,13 @@ class GameWindow:
             elif event.type == pygame.MOUSEWHEEL and self.page == PAGE_TASKS:
                 # Clamp so the wheel can't scroll past the top or bottom of the list.
                 self.scroll_y = max(0, min(self.scroll_max, self.scroll_y - event.y * 40))
-            elif event.type == pygame.MOUSEWHEEL and self.page == PAGE_TYCOON:
+            elif event.type == pygame.MOUSEWHEEL and self.page in TYCOON_PAGES:
                 # The tycoon page forwards the wheel to whichever tycoon is active
                 # (the business list scrolls; the city ignores it).
                 self.tycoon.handle_scroll(event.y, pygame.mouse.get_pos())
             elif event.type == pygame.MOUSEMOTION and self.scroll_dragging:
                 self._drag_scrollbar(event.pos[1])
-            elif event.type == pygame.MOUSEMOTION and self.page == PAGE_TYCOON:
+            elif event.type == pygame.MOUSEMOTION and self.page in TYCOON_PAGES:
                 # Dragging the tycoon's own scrollbar thumb (the business list).
                 self.tycoon.handle_drag(event.pos)
             elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
@@ -305,8 +310,13 @@ class GameWindow:
             if self.nav_tasks_rect.collidepoint(position):
                 self.page = PAGE_TASKS
                 continue
-            if self.nav_tycoon_rect.collidepoint(position):
-                self.page = PAGE_TYCOON
+            if self.nav_business_rect.collidepoint(position):
+                self.page = PAGE_BUSINESS
+                self.tycoon.set_active("business")
+                continue
+            if self.nav_city_rect.collidepoint(position):
+                self.page = PAGE_CITY
+                self.tycoon.set_active("city")
                 continue
             if self.tutorial_button_rect.collidepoint(position):
                 self._open_tutorial()
@@ -319,7 +329,7 @@ class GameWindow:
 
             if self.page == PAGE_TASKS:
                 self._handle_button_list_click(self.frame_buttons, event)
-            elif self.page == PAGE_TYCOON:
+            elif self.page in TYCOON_PAGES:
                 if self._content_rect().collidepoint(position):
                     self.tycoon.handle_click(position)
 
@@ -342,7 +352,7 @@ class GameWindow:
             pass
         elif self.page == PAGE_TASKS:
             self._scroll_tasks_with_key(key)
-        elif self.page == PAGE_TYCOON:
+        elif self.page in TYCOON_PAGES:
             self.tycoon.handle_scroll_key(key)
 
     def _scroll_tasks_with_key(self, key):
@@ -448,7 +458,7 @@ class GameWindow:
         # Only show a hand cursor on the Tycoon page, and only when nothing else
         # (a modal or the tutorial) is covering it, so it never lies about what
         # is actually clickable right now.
-        if self.page == PAGE_TYCOON and self.modal_kind is None and not self.tutorial_active:
+        if self.page in TYCOON_PAGES and self.modal_kind is None and not self.tutorial_active:
             over_something = self.tycoon.is_over_interactive(pygame.mouse.get_pos())
             wanted = pygame.SYSTEM_CURSOR_HAND if over_something else pygame.SYSTEM_CURSOR_ARROW
         else:
@@ -557,9 +567,15 @@ class GameWindow:
 
     def _draw_nav_buttons(self):
         surface = self.screen
-        labels = [(translate("nav_tasks"), PAGE_TASKS), (translate("nav_tycoon"), PAGE_TYCOON)]
+        # The three games each get their own top-navbar entry, in this order:
+        # Aufgaben, then Business, then Stadt.
+        labels = [
+            (translate("nav_tasks"), PAGE_TASKS),
+            (translate("tycoon_tab_business"), PAGE_BUSINESS),
+            (translate("tycoon_tab_city"), PAGE_CITY),
+        ]
         # Measure each label first so the pill background is exactly wide enough
-        # to fit both buttons (with padding), instead of using a fixed width.
+        # to fit every button (with padding), instead of using a fixed width.
         widths = [theme.text_width(text, 14, bold=True) + 44 for text, _ in labels]
         total = sum(widths) + 18
         # Center the whole pill horizontally in the navbar.
@@ -576,8 +592,10 @@ class GameWindow:
             theme.draw_text_centered(surface, text, 14, text_color, rect.centerx, rect.centery, bold=True)
             if page == PAGE_TASKS:
                 self.nav_tasks_rect = rect
+            elif page == PAGE_BUSINESS:
+                self.nav_business_rect = rect
             else:
-                self.nav_tycoon_rect = rect
+                self.nav_city_rect = rect
             x += widths[index] + 6
 
     def _draw_tycoon_page(self):
