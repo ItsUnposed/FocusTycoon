@@ -4,11 +4,50 @@ Planned work for the Python/pygame version. The order below is not chronological
 and does not imply priority - items can be picked up and worked on in any order.
 The items near the very bottom ("later / bigger") are meant to come last.
 
-## Tycoon overhaul
+## Done
 
-The Tycoon page (`tycoon/`) was reworked into an isometric city builder, but it is
-still open for iteration: model, simulation, balancing and the pygame view
-(`tycoon/ui/`) can all keep changing. The items below are the concrete next steps.
+Completed and shipped on the `ToDo` branch:
+
+- [x] Rework the Tycoon into two games hosted on the Tycoon page: an isometric
+      city builder and an electrical-engineering business.
+- [x] Business tycoon core: study degrees (Bachelor, then Master) to unlock
+      skills; level skills with Gold on a cooldown; skills gate machines,
+      prototypes and products; BWL side skills give money bonuses / unlock
+      automation.
+- [x] Production chain: buy machines, develop prototypes, produce products into
+      stock, sell stock for Bargeld; machines can break and be repaired.
+- [x] Per-product automation (auto-produce / auto-sell) that can be bought and,
+      once bought, toggled on (green) / off (orange).
+- [x] Machine repairs are paid with Gold.
+- [x] Bootstrap Gold -> Bargeld trade (unlimited, +50 per click).
+- [x] Group the Education skills into collapsible themed sections.
+- [x] Split the games into separate top-navbar entries (Aufgaben, Business, Stadt).
+- [x] Make the business list scrollable (wheel, scrollbar, PgUp/PgDn/arrows).
+- [x] Hidden debug panel (five quick clicks on the gold symbol) that adds Gold,
+      Coins and Bargeld.
+
+## todo-stadt
+
+- [ ] Two buttons in the bottom-right corner (a left-arrow and a right-arrow).
+      Clicking one rotates the whole city 90 degrees to the left or the right.
+
+## todo-business
+
+- [ ] GUI pass: replace the plain boxes with real illustrations / images for the
+      machines, prototypes, products and skills. The game logic stays the same,
+      only the look changes.
+- [ ] Timeskip: add a debug-menu switch that turns off the upgrade / level-up
+      wait time, so upgrades and skill level-ups finish instantly.
+- [ ] More content (more machines, prototypes and products) plus a materials and
+      inventory rework:
+  - [ ] Remove the current odd product description text.
+  - [ ] Add materials that are bought for Bargeld (buy any amount you can afford).
+  - [ ] Add an inventory ("Lager") that shows which materials (and products) you
+        own; you can also sell them back for 75% of their value.
+  - [ ] Producing a product consumes the specific materials that product needs.
+  - [ ] When auto-sell is off, produced products go into the inventory too.
+  - [ ] Some products are needed to build other products (for example sensors and
+        motors for a robot).
 
 ## Business tycoon: grants and investors
 
@@ -22,8 +61,8 @@ in exchange for something, e.g. a BWL skill / reputation).
 
 Keep making everything more fine-grained and add more of it: more machines, more
 products and prototypes, more skills, deeper tiers. The chain should feel rich and
-long, closer to a real company. (The education/skills part and the degree gating
-are handled separately; this item is about the rest of the content.)
+long, closer to a real company. (The concrete next batch of content - materials, an
+inventory and product-into-product recipes - is captured under todo-business above.)
 
 ## Business tycoon: balancing pass
 
