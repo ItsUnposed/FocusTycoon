@@ -95,4 +95,4 @@ then is the gold paid out.
 
 ### Mobile phone app
 
-Build a mobile (phone) app version of all of this.
+Build a mobile (phone) app version of all of this (for iPhone & iPad).
