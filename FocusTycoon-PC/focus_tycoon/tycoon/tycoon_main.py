@@ -103,6 +103,18 @@ class TycoonPanel:
         # Reward the tycoon the player is currently looking at.
         self._tycoons[self._active].on_task_reward(reward_gold)
 
+    # ---------- debug (the hidden panel) ----------
+
+    def debug_add_coins(self, amount):
+        for tycoon in self._tycoons:
+            if tycoon.name == "city":
+                tycoon.state.add_coins(amount)
+
+    def debug_add_bargeld(self, amount):
+        for tycoon in self._tycoons:
+            if tycoon.name == "business":
+                tycoon.state.earn_bargeld(amount)
+
     # ---------- sound ----------
 
     def is_sound_enabled(self):

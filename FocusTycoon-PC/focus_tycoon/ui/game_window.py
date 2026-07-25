@@ -125,6 +125,12 @@ class GameWindow:
         self.confirm_yes_rect = pygame.Rect(0, 0, 0, 0)
         self.confirm_no_rect = pygame.Rect(0, 0, 0, 0)
 
+        # Hidden debug panel: click the gold pill 5 times within 3 seconds.
+        self.gold_pill_rect = pygame.Rect(0, 0, 0, 0)
+        self._gold_click_times = []
+        self.cheat_active = False
+        self.cheat_buttons = []  # (rect, kind) for the +currency buttons
+
         # In-app dialogs (portal / calendar) instead of tkinter, so nothing freezes
         # and the dialogs are visible in fullscreen too.
         self.modal_kind = None            # None | "portal" | "calendar"
@@ -262,6 +268,14 @@ class GameWindow:
                 continue
             position = event.pos
 
+            # Hidden debug panel: 5 quick clicks on the gold pill open it.
+            if self.gold_pill_rect.collidepoint(position):
+                self._register_gold_click()
+            # While the debug panel is open it swallows the rest of the clicks.
+            if self.cheat_active:
+                self._handle_cheat_click(position)
+                continue
+
             # The language dropdown is always on top.
             if self.language_dropdown.handle_event(event):
                 continue
@@ -385,6 +399,8 @@ class GameWindow:
             self._close_modal()
         elif self.confirm_active:
             self.confirm_active = False
+        elif self.cheat_active:
+            self.cheat_active = False
         elif self.fullscreen:
             self._toggle_fullscreen()
 
@@ -471,6 +487,8 @@ class GameWindow:
             self._draw_tycoon_page()
         if self.confirm_active:
             self._draw_confirm_overlay()
+        if self.cheat_active:
+            self._draw_cheat_overlay()
         if self.modal_kind is not None:
             self._draw_modal()
         if self.tutorial_active:
@@ -499,6 +517,7 @@ class GameWindow:
         gold_text = f"{max(0, self.game.get_gold())} {translate('gold_suffix')}"
         gold_width = theme.text_width(gold_text, 18, bold=True) + 60
         gold_pill = pygame.Rect(self.width - gold_width - 24, 14, gold_width, 36)
+        self.gold_pill_rect = gold_pill  # for the hidden 5-click debug panel
         theme.rounded_rect(surface, gold_pill, theme.CARD, 18, theme.STROKE, 1)
         pygame.draw.circle(surface, theme.GOLD, (gold_pill.x + 20, gold_pill.centery), 8)
         theme.draw_text(surface, gold_text, 18, theme.GOLD, gold_pill.x + 36, gold_pill.y + 8, bold=True)
@@ -949,6 +968,60 @@ class GameWindow:
             self._perform_reset()
         elif self.confirm_no_rect.collidepoint(position):
             self.confirm_active = False
+
+    # ---------- hidden debug panel ----------
+
+    def _register_gold_click(self):
+        # Keep only clicks from the last 3 seconds; five of them opens the panel.
+        now = pygame.time.get_ticks()
+        self._gold_click_times = [t for t in self._gold_click_times if now - t <= 3000]
+        self._gold_click_times.append(now)
+        if len(self._gold_click_times) >= 5:
+            self._gold_click_times = []
+            self.cheat_active = True
+
+    def _draw_cheat_overlay(self):
+        surface = self.screen
+        veil = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        veil.fill((0, 0, 0, 150))
+        surface.blit(veil, (0, 0))
+
+        box = pygame.Rect(0, 0, 420, 300)
+        box.center = (self.width // 2, self.height // 2)
+        theme.rounded_rect(surface, box, theme.PANEL, 18, theme.STROKE, 1)
+        theme.draw_text(surface, "Debug", 20, theme.TEXT, box.x + 28, box.y + 22, bold=True)
+        theme.draw_text(surface, "Add currency (+10000 each)", 12, theme.MUTED, box.x + 28, box.y + 50)
+
+        # One button per currency.
+        self.cheat_buttons = []
+        labels = [("gold", "+10000 Gold"), ("coins", "+10000 Coins"), ("bargeld", "+10000 Bargeld")]
+        y = box.y + 84
+        for kind, label in labels:
+            rect = pygame.Rect(box.x + 28, y, box.width - 56, 40)
+            theme.rounded_rect(surface, rect, theme.CARD_HI, 12)
+            theme.draw_text_centered(surface, label, 14, theme.GOLD, rect.centerx, rect.centery, bold=True)
+            self.cheat_buttons.append((rect, kind))
+            y += 48
+
+        close_rect = pygame.Rect(box.right - 130, box.bottom - 52, 100, 36)
+        theme.rounded_rect(surface, close_rect, theme.CARD, 18)
+        theme.draw_text_centered(surface, translate("cancel"), 13, theme.TEXT,
+                                 close_rect.centerx, close_rect.centery, bold=True)
+        self.cheat_buttons.append((close_rect, "close"))
+
+    def _handle_cheat_click(self, position):
+        for rect, kind in self.cheat_buttons:
+            if not rect.collidepoint(position):
+                continue
+            if kind == "gold":
+                self.game.add_gold(10000)
+            elif kind == "coins":
+                self.tycoon.debug_add_coins(10000)
+            elif kind == "bargeld":
+                self.tycoon.debug_add_bargeld(10000)
+            elif kind == "close":
+                self.cheat_active = False
+            return
 
     # ---------- tutorial overlay ----------
 
